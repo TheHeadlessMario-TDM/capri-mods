@@ -40,6 +40,8 @@ WHAT CLAUDE CAN AND CAN'T DO HERE
     tells you what Claude wanted, so you can ask her and she checks with you first.
 - Can't: run any other commands, change, move or delete files, or install anything. It runs one job at a time,
   15 minutes at most, hidden in the background, without your personal Claude Code settings, hooks or MCP servers.
+- Can't read Capri's own folder (%LOCALAPPDATA%\Capri), where her saved keys and settings live: Claude Code is told to
+  block it. Claude gets a copy of the end of her log (errors.txt) in its working folder instead.
 - Only lines you say or type to Capri start a job. Text on your screen or in Discord can't.
 - Files Claude reads go to Anthropic as part of the job, like any Claude Code session.
 
