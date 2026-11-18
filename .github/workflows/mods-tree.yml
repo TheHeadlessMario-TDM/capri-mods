@@ -1,0 +1,45 @@
+name: Mods tree
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mods/**'
+      - 'tools/make-tree.py'
+      - '.github/workflows/mods-tree.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: mods-tree
+  cancel-in-progress: false
+
+jobs:
+  tree:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          for attempt in 1 2 3; do
+            git fetch --quiet origin main
+            git reset --quiet --hard origin/main
+            python3 -I tools/make-tree.py
+            if git diff --quiet -- tree.json && git ls-files --error-unmatch tree.json >/dev/null 2>&1; then
+              echo 'tree.json is up to date'
+              exit 0
+            fi
+            git add tree.json
+            git commit --quiet -m "tree.json lists the mods at $(git rev-parse --short HEAD)"
+            if git push --quiet origin HEAD:main; then exit 0; fi
+            sleep $((attempt * 5))
+          done
+          exit 1
