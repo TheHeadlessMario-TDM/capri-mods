@@ -21,6 +21,19 @@ In Capri 0.8.3 or newer, open Capri Mainframe and press Mods in the CAPRI band. 
 
 Code mods can be up to 1 MB in Capri 0.9.4 or newer (256 KB before). If yours downloads extra files, like games or translations, write each file's SHA-256 in the mod and refuse any file that doesn't match. Then changing those files means a new mod version, and it's read like any other.
 
+## What the mod check looks for
+Every pull request that touches `mods/` gets the same checks Capri itself makes, and the run's summary page lists what it found. A mod that trips a hard rule can't be listed:
+- A code mod over 1 MB.
+- A code mod that hides its code: it unpacks or decrypts text and also loads code while it runs, so what you can read isn't what would run.
+- A plug-in that isn't a plain zip in Claude's plug-in layout: over 1 MB, more than 400 files, over 8 MB unpacked, any file over 4 MB, or file names that point outside the zip.
+- A plug-in whose server starts with an encoded PowerShell command, downloads something and runs it, or unpacks something hidden and runs it.
+- A plug-in that runs `npx`, `bunx`, `pnpx` or `uvx` without a pinned version, so what runs can't change after it's read.
+- A key written into any file of the mod.
+
+Other things only get listed for the person reading the pull request: what a code mod can reach (programs, the network, Windows, the keyboard, what Capri is told), the sites it contacts, code that's hard to read, reaching into Capri's own settings folder, and plug-ins that pass secret-looking settings through from your environment.
+
+To run it yourself: `python3 tools/check-mods.py my-mod-folder`.
+
 ## Submit without git
 No git needed: fill in the [Submit a mod](https://github.com/lachydotmcg/capri-mods/issues/new?template=submit-mod.yml) form and drag your mod file in, zipped first. A pull request gets opened for you, with your GitHub username as the author, and it's read like any other mod before it goes up. To change something, edit your issue.
 
