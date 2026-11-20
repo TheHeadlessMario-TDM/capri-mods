@@ -25,11 +25,13 @@ fields = (('name', 'Mod name'), ('id', 'Mod id'), ('description', 'Short descrip
 kinds = {'Settings mod (.capri-mod)': ('.capri-mod', 'settings mod', ('.zip', '.json', '.txt'), 2 * mb),
          'Code mod (.capri-code)': ('.capri-code', 'code mod', ('.zip', '.cs', '.txt'), 2 * mb),
          'Skin (.capri-skin)': ('.capri-skin', 'skin', ('.zip',), 96 * mb),
-         'Skill (.capri-skill)': ('.capri-skill', 'skill', ('.zip', '.txt', '.md'), 2 * mb)}
+         'Skill (.capri-skill)': ('.capri-skill', 'skill', ('.zip', '.txt', '.md'), 2 * mb),
+         'Plug-in (.capri-plugin)': ('.capri-plugin', 'plug-in', ('.zip',), 1 * mb)}
 mod_types = tuple(kind[0] for kind in kinds.values())
 kind_words = {kind[1] for kind in kinds.values()}
 upload_cap = 25 * mb   # GitHub's own limit for a dragged-in file
 preview_cap = 2 * mb   # the same as tools/check-mods.py
+plugin_parts = ('plugin.json', 'capri-plugin.json', '.mcp.json', 'mcp.json', 'skill.md')
 
 slug = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?')
 reserved = {'con', 'prn', 'aux', 'nul'} | {'com' + str(n) for n in range(10)} | {'lpt' + str(n) for n in range(10)}
@@ -239,6 +241,12 @@ def unzip(data, want, cap, problems):
             names = [entry.filename for entry in entries]
             if want == '.capri-skin' and 'skin.json' in names and not any(n.lower().endswith(want) for n in names):
                 return data  # a renamed .capri-skin is already the skin, so it's kept byte for byte
+            if (want == '.capri-plugin' and not any(n.lower().endswith(want) for n in names)
+                    and any(n.rsplit('/', 1)[-1].lower() in plugin_parts for n in names)):
+                if len(data) > cap:
+                    problems.append('**Mod file** is over {}.'.format(size_words(cap)))
+                    return None
+                return data
             if len(entries) != 1 or not names[0].lower().endswith(want):
                 problems.append('**Mod file** has to be a zip with just your one `{}` file in it, but it holds {}.'.format(
                     want, listed(names) if names else 'nothing'))
@@ -268,6 +276,13 @@ def content_problem(data, want):
         except Exception:
             return "isn't a skin. A skin is a zip of her pictures and a `skin.json`."
         return None if data[:4] == b'PK\x03\x04' and 'skin.json' in names else "has no `skin.json` at the top, so it isn't a skin."
+    if want == '.capri-plugin':
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as plugin:
+                plugin.namelist()
+        except Exception:
+            return "isn't a plug-in. A plug-in is a zip in Claude's plug-in layout, with a `.mcp.json` or skills in it."
+        return None if data[:4] == b'PK\x03\x04' else "isn't a plain zip, so it isn't a plug-in."
     try:
         text = data.decode('utf-8')
     except ValueError:
