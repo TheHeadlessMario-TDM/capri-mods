@@ -90,6 +90,14 @@
       "about": "Tell Capri what your Discord status should say. It shows on her Discord status (\"Playing Capri\") for 5 hours, then goes back to her normal one by itself. It never puts anything inappropriate or offensive on it."
     },
     {
+      "folder": "capri-internal-browser",
+      "file": "capri-internal-browser.capri-code",
+      "name": "Capri Browser",
+      "kind": "code",
+      "author": "tob7as",
+      "about": "A full web browser built into Capri. Capri can see the page you're on and use it with you: she opens sites, finds videos, controls playback, summarises pages and reads them out loud."
+    },
+    {
       "folder": "capri-lyrics",
       "file": "capri-lyrics.capri-code",
       "name": "Capri Lyrics",
@@ -104,6 +112,14 @@
       "kind": "code",
       "author": "NoxEterna",
       "about": "Connect Capri to Cyberpunk 2077 for nearby/group hacks, native scanner tags, vehicles and devices, eight custom netrunner programs, Protect Me, stealth and optional chaos."
+    },
+    {
+      "folder": "capri-pad",
+      "file": "capri-pad.capri-code",
+      "name": "Capri // Pad",
+      "kind": "code",
+      "author": "CyberPhantxm",
+      "about": "Tired of your Capri sitting on thin air? Now she has a proper place to perch! Bring your desktop companion to life with a dynamic audio-reactive pad."
     },
     {
       "folder": "capriplus-lyrics",
@@ -658,6 +674,14 @@
       "about": "Capri writes her own pet, throw, dodge, greeting and chess lines with her brain instead of repeating the built-in ones, voices them with Fish Audio and never says the same one twice."
     },
     {
+      "folder": "russian-ui",
+      "file": "russian-ui.capri-code",
+      "name": "Rusifikator",
+      "kind": "code",
+      "author": "kucharev7kolja1-afk",
+      "about": "Русификатор Капри: переводит мейнфрейм, настройки, меню, кнопки, подсказки при наведении."
+    },
+    {
       "folder": "sakura",
       "file": "sakura.capri-skin",
       "name": "Sakura",
@@ -786,6 +810,14 @@
       "about": "Counts your gaming time and roasts you when it's time for a break."
     },
     {
+      "folder": "track-commentator",
+      "file": "track-commentator.capri-code",
+      "name": "Track Commentator",
+      "kind": "code",
+      "author": "kyltest12",
+      "about": "Capri comments on new songs in English and Russian, skips ads and keeps a list of liked tracks."
+    },
+    {
       "folder": "vaporwave",
       "file": "vaporwave.capri-skin",
       "name": "Vaporwave",
@@ -824,6 +856,14 @@
       "kind": "skin",
       "author": "Vocyn",
       "about": "Capri in turn-of-the-millennium chrome: liquid-mirror hair reflecting a sky, horizon and shiny floor that drift as she moves, rainbow holographic foil panels, glossy black limbs, an LCD face and twinkling lens stars."
+    },
+    {
+      "folder": "yandere-max",
+      "file": "yandere-max.capri-code",
+      "name": "Yandere Max",
+      "kind": "code",
+      "author": "x0liwier",
+      "about": "Always-on extreme yandere: clingier and more desperate, and the longer you ignore her the more unhinged she gets."
     },
     {
       "folder": "yuno-tone-presets",
