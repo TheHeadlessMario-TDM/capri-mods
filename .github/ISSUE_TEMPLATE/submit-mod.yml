@@ -41,13 +41,14 @@ body:
         - Skin (.capri-skin)
         - Skill (.capri-skill)
         - Companion pack (.capri-companion)
+        - Plug-in (.capri-plugin)
     validations:
       required: true
   - type: textarea
     id: mod-file
     attributes:
       label: Mod file
-      description: GitHub won't take a .capri file on its own, so zip it first (right-click it, then Compress to ZIP file) and drag the .zip in here. A skin can also be renamed from .capri-skin to .zip. Up to 25 MB.
+      description: GitHub won't take a .capri file on its own, so zip it first (right-click it, then Compress to ZIP file) and drag the .zip in here. A skin or plug-in can also just be renamed to end in .zip. Up to 25 MB, and a plug-in up to 1 MB.
     validations:
       required: true
   - type: textarea
@@ -59,7 +60,7 @@ body:
     id: more
     attributes:
       label: More about it
-      description: Optional. Anything else for its README, like what to say to her. For a code mod, say what it reads or changes on the PC.
+      description: Optional. Anything else for its README, like what to say to her. For a code mod, say what it reads or changes on the PC. For a plug-in, say what its servers do and where they connect.
   - type: checkboxes
     id: permission
     attributes:

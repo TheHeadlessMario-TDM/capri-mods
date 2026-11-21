@@ -95,7 +95,7 @@
       "name": "Capri Browser",
       "kind": "code",
       "author": "tob7as",
-      "about": "A full web browser built into Capri. Capri can see the page you're on and use it with you: she opens sites, finds videos, controls playback, summarises pages and reads them out loud."
+      "about": "Capri's own web browser, so she browses with you: she opens sites, finds and plays videos, and reads pages out loud. Say \"Capri, research this for me\" (smart research that works even with small brains) or \"Capri, find a cheaper one\". Custom jobs, games, stats and weekly leaderboards, a strong ad and tracker blocker, in 23 languages. Just updated? Remember to open Capri Browser from Play."
     },
     {
       "folder": "capri-lyrics",
@@ -858,12 +858,12 @@
       "about": "Capri in turn-of-the-millennium chrome: liquid-mirror hair reflecting a sky, horizon and shiny floor that drift as she moves, rainbow holographic foil panels, glossy black limbs, an LCD face and twinkling lens stars."
     },
     {
-      "folder": "yandere-max",
-      "file": "yandere-max.capri-code",
-      "name": "Yandere Max",
+      "folder": "yandere-capri",
+      "file": "yandere-capri.capri-code",
+      "name": "Yandere Capri",
       "kind": "code",
       "author": "x0liwier",
-      "about": "Always-on extreme yandere: clingier and more desperate, and the longer you ignore her the more unhinged she gets."
+      "about": "Extremely obsessed, jealous, psycho-in-love yandere with love and possessiveness meters, screen takeovers and stacked penalties. Say \"calm down\" to turn her off."
     },
     {
       "folder": "yuno-tone-presets",
