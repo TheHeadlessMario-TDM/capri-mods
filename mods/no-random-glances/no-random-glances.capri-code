@@ -1,0 +1,375 @@
+// capri-mod: 1
+// id: no-random-glances
+// name: No Random Glances
+// version: 1.0.0
+// author: Quaisar_THM
+// description: She stops glancing at your screen on a timer and only looks when you ask: "look at this", "check this out" and the like. Phrases are in Options.
+// permissions: chat
+// requires: api 3
+
+using System;
+using System.Reflection;
+using System.Text.RegularExpressions;
+using System.Windows.Forms;
+using CapriDesktop;
+using System.Collections.Generic;
+using System.Drawing;
+
+public class GlanceOnCue : ICapriMod
+{
+    const BindingFlags Inst = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+    const BindingFlags Stat = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
+    const double Never = 1e12;          // her clock never reaches this
+    int armedMs = 15000;                // how long a cue waits for the glance to start
+    Regex cue;
+    Opts opts;
+    Action<CapriMessage> sending;
+    string dropped;                 // the text Capri uses when files are dropped on her
+    const string Attached = "(picture attached) ";
+    const string DefaultCues = "look at this, check this out, do you see this, can you see this, what do you think of this";
+    // haha, hahaha, ahaha, lol, lool, lmao, lmfao, rofl, and the crying-laughing emoji.
+    const string Laugh = @"\b(?:a?ha(?:ha)+h?|he(?:he)+|lo+l|lmf?ao+|rofl)\b|\uD83D\uDE02|\uD83E\uDD23";
+
+    ICapriHost capri;
+    Form her;
+    FieldInfo nextGlance, lastGlance, alsoHeard;
+    Func<string, bool> theirAlsoHeard;
+    volatile bool armed;
+    DateTime armedAt;
+    double glanceWas;
+    System.Threading.Timer hold;
+
+    public void Start(ICapriHost host)
+    {
+        capri = host;
+        if (opts == null)
+        {
+            opts = new Opts(host, "No Random Glances");
+            opts.Section("What makes her look");
+            opts.Text("Phrases that make her look at your screen, comma separated", "cues", DefaultCues, delegate(string v) { BuildCue(); });
+            opts.Toggle("Laughing counts too (haha, lol, lmao, and the laughing emojis)", "laugh", false, delegate(bool v) { BuildCue(); });
+            opts.Number("Give up waiting for the glance after (seconds)", "wait", 15, 3, 60, 1, 0, delegate(double v) { armedMs = (int)(v * 1000); });
+            opts.Note("Her timed glances stay off while this mod is on. \"Look at my screen\" always works.");
+        }
+        BuildCue();
+        armedMs = (int)(opts.Num("wait", 15, 3, 60) * 1000);
+        try
+        {
+            Assembly app = typeof(ICapriHost).Assembly;
+            Type companion = app.GetType("CapriDesktop.Companion", true);
+            nextGlance = companion.GetField("nextGlance", Inst);
+            lastGlance = companion.GetField("lastGlance", Inst);
+            // Checked here so a future update that renames these only gets logged.
+            if (nextGlance == null || lastGlance == null) throw new MissingFieldException("Companion", "nextGlance");
+
+            // Her ears only pass on lines that are "for her". This hook is how
+            // mods add more, so asking her to look counts even without her name.
+            alsoHeard = app.GetType("CapriDesktop.Hands", true).GetField("AlsoHeard", Stat);
+            theirAlsoHeard = (Func<string, bool>)alsoHeard.GetValue(null);
+            Func<string, bool> before = theirAlsoHeard;
+            alsoHeard.SetValue(null, (Func<string, bool>)delegate(string words) { return IsCue(words) || before(words); });
+
+            // With a picture attached, "look at this" is about the picture. Without this,
+            // her command check reads it as "look at my screen" and the picture is ignored.
+            try { dropped = (string)app.GetType("CapriDesktop.Files", true).GetField("Dropped", Stat).GetRawConstantValue(); }
+            catch (Exception) { dropped = null; }
+            sending = OnSending;
+            host.Chat.Sending += sending;
+            // Keep pushing her next timed glance out of reach.
+            hold = new System.Threading.Timer(delegate { Hold(); }, null, 0, 1000);
+            capri.Log("No Random Glances: she only looks when you ask her to.");
+        }
+        catch (Exception e)
+        {
+            capri.Log("No Random Glances could not start: " + e.Message);
+            Stop();
+        }
+    }
+
+    public bool Heard(string words)
+    {
+        if (!IsCue(words) || PictureWaiting()) return false;
+        Form f = Her();
+        if (f == null) return false;
+        armed = true;
+        armedAt = DateTime.UtcNow;
+        f.BeginInvoke((MethodInvoker)delegate
+        {
+            glanceWas = (double)lastGlance.GetValue(f);
+            nextGlance.SetValue(f, 0.0);    // due now: her next tick takes the look
+        });
+        return true;                         // the cue is for the glance, not a chat reply
+    }
+
+    void OnSending(CapriMessage m)
+    {
+        if (m == null || m.Cancel || string.IsNullOrEmpty(m.Text)) return;
+        if (m.Source != "you" && m.Source != "mod") return;
+        if (dropped != null && m.Text.StartsWith(dropped, StringComparison.Ordinal)) return;   // files dropped, no words
+        if (m.Text.StartsWith(Attached, StringComparison.OrdinalIgnoreCase) || !PictureWaiting()) return;
+        m.Text = Attached + m.Text;
+    }
+
+    // True while a pasted or attached picture is queued for her next message.
+    bool PictureWaiting()
+    {
+        try
+        {
+            Form f = Her();
+            if (f == null) return false;
+            object brain = f.GetType().GetField("brain", Inst).GetValue(f);
+            object files = brain.GetType().GetField("Attachments", Inst).GetValue(brain);
+            return (bool)files.GetType().GetProperty("Waiting", Inst).GetValue(files, null);
+        }
+        catch (Exception) { return false; }
+    }
+
+    void BuildCue()
+    {
+        List<string> parts = new List<string>();
+        List<string> words = new List<string>();
+        foreach (string w in Opts.Words(opts.Str("cues", DefaultCues))) words.Add(Regex.Escape(w));
+        if (words.Count > 0) parts.Add(@"\b(?:" + string.Join("|", words.ToArray()) + @")\b");
+        if (opts.Flag("laugh", false)) parts.Add(Laugh);
+        cue = parts.Count == 0 ? null : new Regex(string.Join("|", parts.ToArray()), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    bool IsCue(string words)
+    {
+        Regex r = cue;
+        return r != null && !string.IsNullOrEmpty(words) && r.IsMatch(words);
+    }
+
+    void Hold()
+    {
+        Form f = Her();
+        if (f == null) return;
+        try
+        {
+            f.BeginInvoke((MethodInvoker)delegate
+            {
+                if (armed)
+                {
+                    // Release the hold once the cued glance has started, or give up.
+                    bool started = (double)lastGlance.GetValue(f) != glanceWas;
+                    if (!started && (DateTime.UtcNow - armedAt).TotalMilliseconds < armedMs) return;
+                    armed = false;
+                }
+                nextGlance.SetValue(f, Never);
+            });
+        }
+        catch (InvalidOperationException) { }
+    }
+
+    Form Her()
+    {
+        if (her != null && !her.IsDisposed) return her;
+        try
+        {
+            foreach (Form f in Application.OpenForms)
+                if (f.GetType().FullName == "CapriDesktop.Companion" && f.IsHandleCreated) return her = f;
+        }
+        catch (InvalidOperationException) { }
+        return null;
+    }
+
+    public void Stop()
+    {
+        try
+        {
+            if (sending != null && capri != null) { capri.Chat.Sending -= sending; sending = null; }
+            if (hold != null) { hold.Dispose(); hold = null; }
+            if (alsoHeard != null && theirAlsoHeard != null) alsoHeard.SetValue(null, theirAlsoHeard);
+            Form f = Her();
+            // -1 is her own "not scheduled yet": she sets a fresh glance time on her next tick.
+            if (f != null && nextGlance != null) f.BeginInvoke((MethodInvoker)delegate { nextGlance.SetValue(f, -1.0); });
+        }
+        catch (Exception e)
+        {
+            if (capri != null) capri.Log("No Random Glances could not restore her glances: " + e.Message);
+        }
+    }
+}
+
+// ---- Options page (Quaisar_THM's shared toolkit) -------------------------------
+// An Options page under Mainframe > Mods, in her colours. Every value lives in
+// this mod's own Store, so it survives restarts and updates. Toggles and
+// numbers apply as you change them; text applies on Enter or when you click away.
+sealed class Opts
+{
+    static readonly Color Back = Color.FromArgb(16, 15, 8), Ink = Color.FromArgb(236, 236, 241),
+        Dim = Color.FromArgb(150, 146, 120), Yellow = Color.FromArgb(252, 239, 3),
+        Cyan = Color.FromArgb(5, 202, 237), Field = Color.FromArgb(30, 29, 14), Edge = Color.FromArgb(90, 86, 10);
+    const int Wide = 690, Right = 470;
+
+    delegate int Row(Control page, int y);
+    readonly ICapriHost host;
+    readonly List<Row> rows = new List<Row>();
+
+    public Opts(ICapriHost host, string title)
+    {
+        this.host = host;
+        host.Ui.SetOptions(title, Build);
+    }
+
+    // Reading values, with sane fallbacks for anything missing or out of range.
+    public bool Flag(string key, bool def) { try { return host.Store.Flag(key, def); } catch (Exception) { return def; } }
+    public double Num(string key, double def, double min, double max)
+    {
+        double v;
+        try { v = host.Store.Number(key, def); } catch (Exception) { v = def; }
+        return double.IsNaN(v) ? def : Math.Max(min, Math.Min(max, v));
+    }
+    public string Str(string key, string def)
+    {
+        try { string v = host.Store.Get(key, def); return v ?? def; } catch (Exception) { return def; }
+    }
+
+    public void Section(string title)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            System.Windows.Forms.Label l = Text(title.ToUpperInvariant(), 18, y + (y > 14 ? 10 : 0), Wide);
+            l.ForeColor = Cyan;
+            l.Font = new Font("Segoe UI Semibold", 9.5f);
+            p.Controls.Add(l);
+            return l.Bottom + 8;
+        });
+    }
+
+    public void Note(string text)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            System.Windows.Forms.Label l = Text(text, 18, y, Wide);
+            l.ForeColor = Dim;
+            l.Font = new Font("Segoe UI", 8.5f);
+            l.Height = TextRenderer.MeasureText(text, l.Font, new Size(Wide, 0), TextFormatFlags.WordBreak).Height + 4;
+            p.Controls.Add(l);
+            return l.Bottom + 8;
+        });
+    }
+
+    public void Toggle(string label, string key, bool def, Action<bool> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
+            Button off = Pill("OFF", Right + 50, y), on = Pill("ON", Right + 140, y);
+            MethodInvoker paint = delegate
+            {
+                bool v = Flag(key, def);
+                Lit(on, v);
+                Lit(off, !v);
+            };
+            off.Click += delegate { Save(key, false); paint(); Tell(changed, false); };
+            on.Click += delegate { Save(key, true); paint(); Tell(changed, true); };
+            paint();
+            p.Controls.Add(off);
+            p.Controls.Add(on);
+            return y + 42;
+        });
+    }
+
+    public void Number(string label, string key, double def, double min, double max, double step, int decimals, Action<double> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
+            NumericUpDown box = new NumericUpDown
+            {
+                Left = Right + 50, Top = y + 2, Width = 170, DecimalPlaces = decimals,
+                Minimum = (decimal)min, Maximum = (decimal)max, Increment = (decimal)step,
+                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f), TextAlign = HorizontalAlignment.Center,
+            };
+            box.Value = (decimal)Num(key, def, min, max);
+            box.ValueChanged += delegate
+            {
+                double v = (double)box.Value;
+                try { host.Store.Set(key, v); } catch (Exception) { }
+                Tell(changed, v);
+            };
+            p.Controls.Add(box);
+            return y + 42;
+        });
+    }
+
+    public void Text(string label, string key, string def, Action<string> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y, Wide));
+            TextBox box = new TextBox
+            {
+                Left = 18, Top = y + 24, Width = Wide, Text = Str(key, def),
+                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f),
+            };
+            string applied = box.Text;
+            MethodInvoker apply = delegate
+            {
+                if (box.Text == applied) return;
+                applied = box.Text;
+                try { host.Store.Set(key, applied); } catch (Exception) { }
+                Tell(changed, applied);
+            };
+            box.Leave += delegate { apply(); };
+            box.KeyDown += delegate(object s, KeyEventArgs e)
+            {
+                if (e.KeyCode != Keys.Enter) return;
+                e.SuppressKeyPress = true;
+                apply();
+            };
+            p.Controls.Add(box);
+            return box.Bottom + 12;
+        });
+    }
+
+    Control Build()
+    {
+        Panel page = new Panel { Width = Wide + 36, BackColor = Back, ForeColor = Ink, Font = new Font("Segoe UI", 9.5f) };
+        int y = 14;
+        foreach (Row r in rows) y = r(page, y);
+        page.Height = y + 10;
+        return page;
+    }
+
+    void Save(string key, bool v) { try { host.Store.Set(key, v); } catch (Exception) { } }
+
+    // A setting that fails to apply is logged, never thrown into her window.
+    void Tell<T>(Action<T> changed, T value)
+    {
+        if (changed == null) return;
+        try { changed(value); }
+        catch (Exception e) { try { host.Log("Options: " + e.Message); } catch (Exception) { } }
+    }
+
+    static System.Windows.Forms.Label Text(string text, int x, int y, int width)
+    {
+        return new System.Windows.Forms.Label { Text = text, Left = x, Top = y, Width = width, AutoSize = false, Height = 22, ForeColor = Ink, BackColor = Color.Transparent };
+    }
+
+    static Button Pill(string text, int x, int y)
+    {
+        Button b = new Button { Text = text, Left = x, Top = y, Width = 84, Height = 30, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Default, Font = new Font("Segoe UI Semibold", 9f) };
+        b.FlatAppearance.BorderColor = Edge;
+        return b;
+    }
+
+    static void Lit(Button b, bool lit)
+    {
+        b.BackColor = lit ? Yellow : Field;
+        b.ForeColor = lit ? Back : Ink;
+        b.FlatAppearance.BorderColor = lit ? Yellow : Edge;
+    }
+
+    // "a, b ,c" -> ["a","b","c"], blanks dropped.
+    public static List<string> Words(string list)
+    {
+        List<string> words = new List<string>();
+        foreach (string w in (list ?? "").Split(','))
+            if (w.Trim().Length > 0) words.Add(w.Trim());
+        return words;
+    }
+}
