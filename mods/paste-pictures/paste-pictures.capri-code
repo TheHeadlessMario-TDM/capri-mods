@@ -1,0 +1,427 @@
+// capri-mod: 1
+// id: paste-pictures
+// name: Paste Pictures
+// version: 1.0.0
+// author: Quaisar_THM
+// description: Press Ctrl+V in her Type box with a screenshot, a copied picture or picture files copied in Explorer to attach them, then type or just press Enter.
+// requires: api 3
+
+using System;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.IO;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+using CapriDesktop;
+using System.Collections.Generic;
+
+public class PasteScreenshot : ICapriMod
+{
+    const BindingFlags Inst = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+    const BindingFlags Stat = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
+    int longest = 2000;           // long edge, so a big desktop stays a sendable size
+    double keepHours = 24 * 30;   // DM Capri! shows them alongside the chat
+    Opts opts;
+    const int SetHint = 0x1501;
+    const string AttachedHint = "Screenshot attached. Type something, or press Enter";
+    const string NormalHint = "Say something to Capri";
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wide, string text);
+
+    ICapriHost capri;
+    System.Threading.Timer waiting;
+    Form her;
+    Control input;
+    KeyEventHandler handler;
+    PreviewKeyDownEventHandler enter;
+    string attached;    // file names waiting to go with the next message
+
+    public void Start(ICapriHost host)
+    {
+        capri = host;
+        if (opts == null)
+        {
+            opts = new Opts(host, "Paste Pictures");
+            opts.Section("Pasted pictures");
+            opts.Number("Longest side of a pasted picture (pixels)", "longest", 2000, 640, 4000, 100, 0, delegate(double v) { longest = (int)v; });
+            opts.Number("Keep pasted screenshots for (days)", "days", 30, 1, 365, 1, 0, delegate(double v) { keepHours = v * 24; });
+            opts.Note("Smaller pictures send faster and use less of her brain. DM Capri! shows them for as long as they're kept.");
+        }
+        longest = (int)opts.Num("longest", 2000, 640, 4000);
+        keepHours = opts.Num("days", 30, 1, 365) * 24;
+        try { Prune(host.Folder, keepHours); }
+        catch (Exception) { }
+        // Her window may not exist yet this early, so keep trying.
+        waiting = new System.Threading.Timer(delegate { Attach(); }, null, 0, 500);
+    }
+
+    public bool Heard(string words) { return false; }
+
+    public void Stop()
+    {
+        try
+        {
+            if (waiting != null) { waiting.Dispose(); waiting = null; }
+            Form f = her;
+            if (f == null || f.IsDisposed || input == null || handler == null) return;
+            f.BeginInvoke((MethodInvoker)delegate
+            {
+                input.KeyDown -= handler;
+                if (enter != null) input.PreviewKeyDown -= enter;
+                Hint(NormalHint);
+            });
+        }
+        catch (Exception e)
+        {
+            if (capri != null) capri.Log("Paste Pictures could not stop: " + e.Message);
+        }
+    }
+
+    void Attach()
+    {
+        Form f = Her();
+        if (f == null || waiting == null) return;
+        waiting.Dispose();
+        waiting = null;
+        her = f;
+        f.BeginInvoke((MethodInvoker)delegate
+        {
+            // On her window's thread, where an error would take her down.
+            try
+            {
+                object typer = f.GetType().GetField("typer", Inst).GetValue(f);
+                input = (Control)typer.GetType().GetField("input", Inst).GetValue(typer);
+                handler = OnKey;
+                input.KeyDown += handler;
+                // Preview runs before her own Enter handling empties the box,
+                // so it can still tell whether anything was typed.
+                enter = OnEnter;
+                input.PreviewKeyDown += enter;
+                capri.Log("Paste Pictures: Ctrl+V in her Type box attaches the picture.");
+            }
+            catch (Exception e) { capri.Log("Paste Pictures could not start: " + e.Message); }
+        });
+    }
+
+    void OnKey(object sender, KeyEventArgs key)
+    {
+        try
+        {
+            if (key.KeyCode != Keys.V || !key.Control || key.Alt || key.Shift) return;
+            List<string> paths = new List<string>();
+            if (Clipboard.ContainsImage())
+            {
+                // A screenshot, or a picture copied from a browser or app.
+                using (Image picture = Clipboard.GetImage())
+                    if (picture != null) paths.Add(SaveShot(picture, capri.Folder, longest));
+            }
+            else if (Clipboard.ContainsFileDropList())
+            {
+                // Picture files copied in Explorer: the clipboard holds the files, not the picture.
+                foreach (string file in Clipboard.GetFileDropList())
+                {
+                    if (paths.Count >= MostFiles) break;
+                    if (!IsPicture(file)) continue;
+                    // Read into memory first, so the file isn't left locked.
+                    using (MemoryStream bytes = new MemoryStream(File.ReadAllBytes(file)))
+                    using (Image picture = Image.FromStream(bytes))
+                        paths.Add(SaveShot(picture, capri.Folder, longest));
+                }
+            }
+            if (paths.Count == 0) return;                // text, or files that aren't pictures, paste as usual
+            key.SuppressKeyPress = true;
+            foreach (string path in paths) Attach(path);
+        }
+        catch (Exception e) { capri.Log("Paste Pictures: " + e.Message); }
+    }
+
+    const int MostFiles = 5;
+    const long BiggestFile = 50L * 1024 * 1024;
+    static readonly string[] PictureTypes = { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff" };
+
+    static bool IsPicture(string file)
+    {
+        try
+        {
+            return Array.IndexOf(PictureTypes, Path.GetExtension(file).ToLowerInvariant()) >= 0
+                && File.Exists(file) && new FileInfo(file).Length <= BiggestFile;
+        }
+        catch (Exception) { return false; }
+    }
+
+    // Queues the picture without sending anything. Starting her on it here
+    // would mean the Enter on their message cancels the read halfway, and
+    // she'd be told the file was damaged. Her next message picks it up.
+    void Attach(string path)
+    {
+        object brain = her.GetType().GetField("brain", Inst).GetValue(her);
+        object files = brain.GetType().GetField("Attachments", Inst).GetValue(brain);
+        MethodInfo give = files.GetType().GetMethod("Give", Inst);
+        string names = (string)give.Invoke(files, new object[] { new[] { path } });
+        if (string.IsNullOrEmpty(names)) { capri.Log("Paste Pictures: she couldn't take that picture."); return; }
+        attached = attached == null ? names : attached + ", " + names;
+        Hint(AttachedHint);
+    }
+
+    void OnEnter(object sender, PreviewKeyDownEventArgs key)
+    {
+        try
+        {
+            if (key.KeyCode != Keys.Enter || attached == null) return;
+            string names = attached;
+            attached = null;
+            Hint(NormalHint);
+            // With words in the box, her own Enter sends them and the picture goes along.
+            if (input.Text.Trim().Length == 0) Send(names);
+        }
+        catch (Exception e) { capri.Log("Paste Pictures: " + e.Message); }
+    }
+
+    // Enter on an empty box: exactly what dropping a file on her does.
+    void Send(string names)
+    {
+        Assembly app = typeof(ICapriHost).Assembly;
+        string dropped = (string)app.GetType("CapriDesktop.Files", true).GetField("Dropped", Stat).GetRawConstantValue();
+        // Hear(text, shown, prompt, ...) where everything after the third is
+        // optional: 0.8.x had 6 settings, 0.9.0 added a 7th, and later ones may add more.
+        foreach (MethodInfo m in her.GetType().GetMethods(Inst))
+        {
+            ParameterInfo[] ps = m.GetParameters();
+            if (m.Name != "Hear" || ps.Length < 3) continue;
+            bool fits = ps[0].ParameterType == typeof(string) && ps[1].ParameterType == typeof(string) && ps[2].ParameterType == typeof(string);
+            for (int i = 3; i < ps.Length && fits; i++) fits = ps[i].IsOptional;
+            if (!fits) continue;
+            object[] values = new object[ps.Length];
+            values[0] = dropped; values[1] = names; values[2] = "> file: ";
+            for (int i = 3; i < ps.Length; i++) values[i] = ps[i].DefaultValue;
+            m.Invoke(her, values);
+            return;
+        }
+        capri.Log("Paste Pictures: couldn't find how to hand it to her.");
+    }
+
+    void Hint(string text)
+    {
+        if (input != null && input.IsHandleCreated) SendMessage(input.Handle, SetHint, new IntPtr(1), text);
+    }
+
+    static string SaveShot(Image picture, string folder, int longest)
+    {
+        double scale = Math.Min(1.0, (double)longest / Math.Max(picture.Width, picture.Height));
+        int width = Math.Max(1, (int)Math.Round(picture.Width * scale));
+        int height = Math.Max(1, (int)Math.Round(picture.Height * scale));
+        string path = Path.Combine(folder, "screenshot-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".png");
+        using (Bitmap shot = new Bitmap(width, height, PixelFormat.Format24bppRgb))
+        using (Graphics canvas = Graphics.FromImage(shot))
+        {
+            canvas.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            canvas.DrawImage(picture, 0, 0, width, height);
+            shot.Save(path, ImageFormat.Png);
+        }
+        return path;
+    }
+
+    // Kept for a month so the chat log can show them, then cleared.
+    static void Prune(string folder, double keepHours)
+    {
+        foreach (string file in Directory.GetFiles(folder, "screenshot-*.png"))
+            if ((DateTime.Now - File.GetLastWriteTime(file)).TotalHours > keepHours) File.Delete(file);
+    }
+
+    static Form Her()
+    {
+        try
+        {
+            foreach (Form f in Application.OpenForms)
+                if (f.GetType().FullName == "CapriDesktop.Companion" && f.IsHandleCreated) return f;
+        }
+        catch (InvalidOperationException) { }
+        return null;
+    }
+}
+
+// ---- Options page (Quaisar_THM's shared toolkit) -------------------------------
+// An Options page under Mainframe > Mods, in her colours. Every value lives in
+// this mod's own Store, so it survives restarts and updates. Toggles and
+// numbers apply as you change them; text applies on Enter or when you click away.
+sealed class Opts
+{
+    static readonly Color Back = Color.FromArgb(16, 15, 8), Ink = Color.FromArgb(236, 236, 241),
+        Dim = Color.FromArgb(150, 146, 120), Yellow = Color.FromArgb(252, 239, 3),
+        Cyan = Color.FromArgb(5, 202, 237), Field = Color.FromArgb(30, 29, 14), Edge = Color.FromArgb(90, 86, 10);
+    const int Wide = 690, Right = 470;
+
+    delegate int Row(Control page, int y);
+    readonly ICapriHost host;
+    readonly List<Row> rows = new List<Row>();
+
+    public Opts(ICapriHost host, string title)
+    {
+        this.host = host;
+        host.Ui.SetOptions(title, Build);
+    }
+
+    // Reading values, with sane fallbacks for anything missing or out of range.
+    public bool Flag(string key, bool def) { try { return host.Store.Flag(key, def); } catch (Exception) { return def; } }
+    public double Num(string key, double def, double min, double max)
+    {
+        double v;
+        try { v = host.Store.Number(key, def); } catch (Exception) { v = def; }
+        return double.IsNaN(v) ? def : Math.Max(min, Math.Min(max, v));
+    }
+    public string Str(string key, string def)
+    {
+        try { string v = host.Store.Get(key, def); return v ?? def; } catch (Exception) { return def; }
+    }
+
+    public void Section(string title)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            System.Windows.Forms.Label l = Text(title.ToUpperInvariant(), 18, y + (y > 14 ? 10 : 0), Wide);
+            l.ForeColor = Cyan;
+            l.Font = new Font("Segoe UI Semibold", 9.5f);
+            p.Controls.Add(l);
+            return l.Bottom + 8;
+        });
+    }
+
+    public void Note(string text)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            System.Windows.Forms.Label l = Text(text, 18, y, Wide);
+            l.ForeColor = Dim;
+            l.Font = new Font("Segoe UI", 8.5f);
+            l.Height = TextRenderer.MeasureText(text, l.Font, new Size(Wide, 0), TextFormatFlags.WordBreak).Height + 4;
+            p.Controls.Add(l);
+            return l.Bottom + 8;
+        });
+    }
+
+    public void Toggle(string label, string key, bool def, Action<bool> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
+            Button off = Pill("OFF", Right + 50, y), on = Pill("ON", Right + 140, y);
+            MethodInvoker paint = delegate
+            {
+                bool v = Flag(key, def);
+                Lit(on, v);
+                Lit(off, !v);
+            };
+            off.Click += delegate { Save(key, false); paint(); Tell(changed, false); };
+            on.Click += delegate { Save(key, true); paint(); Tell(changed, true); };
+            paint();
+            p.Controls.Add(off);
+            p.Controls.Add(on);
+            return y + 42;
+        });
+    }
+
+    public void Number(string label, string key, double def, double min, double max, double step, int decimals, Action<double> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
+            NumericUpDown box = new NumericUpDown
+            {
+                Left = Right + 50, Top = y + 2, Width = 170, DecimalPlaces = decimals,
+                Minimum = (decimal)min, Maximum = (decimal)max, Increment = (decimal)step,
+                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f), TextAlign = HorizontalAlignment.Center,
+            };
+            box.Value = (decimal)Num(key, def, min, max);
+            box.ValueChanged += delegate
+            {
+                double v = (double)box.Value;
+                try { host.Store.Set(key, v); } catch (Exception) { }
+                Tell(changed, v);
+            };
+            p.Controls.Add(box);
+            return y + 42;
+        });
+    }
+
+    public void Text(string label, string key, string def, Action<string> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y, Wide));
+            TextBox box = new TextBox
+            {
+                Left = 18, Top = y + 24, Width = Wide, Text = Str(key, def),
+                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f),
+            };
+            string applied = box.Text;
+            MethodInvoker apply = delegate
+            {
+                if (box.Text == applied) return;
+                applied = box.Text;
+                try { host.Store.Set(key, applied); } catch (Exception) { }
+                Tell(changed, applied);
+            };
+            box.Leave += delegate { apply(); };
+            box.KeyDown += delegate(object s, KeyEventArgs e)
+            {
+                if (e.KeyCode != Keys.Enter) return;
+                e.SuppressKeyPress = true;
+                apply();
+            };
+            p.Controls.Add(box);
+            return box.Bottom + 12;
+        });
+    }
+
+    Control Build()
+    {
+        Panel page = new Panel { Width = Wide + 36, BackColor = Back, ForeColor = Ink, Font = new Font("Segoe UI", 9.5f) };
+        int y = 14;
+        foreach (Row r in rows) y = r(page, y);
+        page.Height = y + 10;
+        return page;
+    }
+
+    void Save(string key, bool v) { try { host.Store.Set(key, v); } catch (Exception) { } }
+
+    // A setting that fails to apply is logged, never thrown into her window.
+    void Tell<T>(Action<T> changed, T value)
+    {
+        if (changed == null) return;
+        try { changed(value); }
+        catch (Exception e) { try { host.Log("Options: " + e.Message); } catch (Exception) { } }
+    }
+
+    static System.Windows.Forms.Label Text(string text, int x, int y, int width)
+    {
+        return new System.Windows.Forms.Label { Text = text, Left = x, Top = y, Width = width, AutoSize = false, Height = 22, ForeColor = Ink, BackColor = Color.Transparent };
+    }
+
+    static Button Pill(string text, int x, int y)
+    {
+        Button b = new Button { Text = text, Left = x, Top = y, Width = 84, Height = 30, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Default, Font = new Font("Segoe UI Semibold", 9f) };
+        b.FlatAppearance.BorderColor = Edge;
+        return b;
+    }
+
+    static void Lit(Button b, bool lit)
+    {
+        b.BackColor = lit ? Yellow : Field;
+        b.ForeColor = lit ? Back : Ink;
+        b.FlatAppearance.BorderColor = lit ? Yellow : Edge;
+    }
+
+    // "a, b ,c" -> ["a","b","c"], blanks dropped.
+    public static List<string> Words(string list)
+    {
+        List<string> words = new List<string>();
+        foreach (string w in (list ?? "").Split(','))
+            if (w.Trim().Length > 0) words.Add(w.Trim());
+        return words;
+    }
+}
