@@ -14614,6 +14614,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
         });
       };
       v.MakeMenu = delegate { ContextMenuStrip m = NewMenu(); m.Tag = mod.look.Shade(4); return m; };
+      v.CloseAsked = delegate { Post(delegate { CloseQuiet(t); }); };
       v.ExtensionsAsked = delegate
       {
         Post(delegate
@@ -15593,8 +15594,8 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     public abstract void Html(string html);
     public abstract void Go(string url);
     public abstract void Reload();
-    // ExtensionsAsked: something tried to open the browser's own Extensions page.
-    public Action ExtensionsAsked;
+    // ExtensionsAsked: something tried to open the browser's own Extensions page. CloseAsked: the page closed its own tab.
+    public Action ExtensionsAsked, CloseAsked;
     protected bool Ours(string url)
     {
       if (url != null && ExtensionsAsked != null && Regex.IsMatch(url, @"^(?:edge|chrome)://extensions", RegexOptions.IgnoreCase)) { ExtensionsAsked(); return true; }
@@ -15658,6 +15659,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
           return;
         }
         core = Get(view, "CoreWebView2");
+        Hook(core, "WindowCloseRequested", delegate(object done) { if (CloseAsked != null) CloseAsked(); });
         // Popups and "open in new tab" stay in Capri Browser.
         Hook(core, "NewWindowRequested", delegate(object request)
         {
