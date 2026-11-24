@@ -19,7 +19,7 @@ public class HerColorsUi : ICapriMod
     const BindingFlags Any = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
     const int NightCity = 0;
 
-    // Night City's 26 Mainframe colours, in Capri's own order. Her yellows
+    // Night City's Mainframe colours (26, and 30 from 0.9.8), in Capri's own order. Her yellows
     // replace the reds; her cyans replace the teals; backgrounds stay dark
     // so yellow text keeps its contrast.
     static readonly int[][] Theme = {
@@ -49,6 +49,12 @@ public class HerColorsUi : ICapriMod
         new[] {232,236,240},  // SheetInk
         new[] {122,128,138},  // SheetDim
         new[] { 16, 15,  8},  // MenuBack  right-click menu
+        // 0.9.8 moved her Look colours into the theme: the TYPE/TALK pill, her
+        // name on the bubble and her small widgets now read these four.
+        new[] {  5,202,237},  // Cyan      (her accent)
+        new[] {255,255,  0},  // Red       (her body)
+        new[] {  0,255,255},  // Neon      (her edges)
+        new[] {252,239,  3},  // Pink      (her hair)
     };
 
     // Fixed colours elsewhere, as "Class.Field". A field a later Capri
