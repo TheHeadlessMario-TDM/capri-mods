@@ -642,6 +642,14 @@
       "about": "Changes Capri's skin by time of day, day of the week or date. Neon Sign at night, the Santa hat in December, Sakura on weekends."
     },
     {
+      "folder": "paint-job",
+      "file": "paint-job.capri-code",
+      "name": "Paint Job",
+      "kind": "code",
+      "author": "Quaisar_THM",
+      "about": "Capri's colour skins only reach part of her UI. Paint Job repaints the rest: the Night City Mainframe theme, her speech bubble and small widgets, her HUD portrait, her own computer window, and her file editor and panel art."
+    },
+    {
       "folder": "prism-overdrive",
       "file": "prism-overdrive.capri-skin",
       "name": "Prism Overdrive",
@@ -840,6 +848,14 @@
       "kind": "code",
       "author": "Potato",
       "about": "Wear several skins at once, like Halo over Galaxy Hair, on top of any skin and colour set."
+    },
+    {
+      "folder": "word-filter",
+      "file": "word-filter.capri-code",
+      "name": "Word Filter",
+      "kind": "code",
+      "author": "Quaisar_THM",
+      "about": "Stops her saying words you don't want, in both her typed replies and what she says out loud."
     },
     {
       "folder": "workspace-usage-ring",
