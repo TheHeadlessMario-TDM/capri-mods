@@ -5184,6 +5184,7 @@ public class CapriInternalBrowser : ICapriMod
       {
         string step = Regex.Replace(steps[i].Trim(), @"^(?:then|and|and\s+then|next|after\s+that)[,\s]+", "", Plain).Trim().TrimEnd('.');
         string next = i + 1 < steps.Length ? steps[i + 1].Trim() : "";
+        stepAfter = next;
         Match notes = Regex.Match(next, @"^(?:then\s+)?(?:add|put|save|write)\s+(?:it|that|this|them)?\s*(?:to|in|into)\s+(?:my\s+|the\s+)?(?<book>[\w' -]*?)\s*notes?(?:book)?$", Plain);
         if (Regex.IsMatch(step, @"^(?:summari[sz]e|sum\s+(?:it\s+)?up|tl;?dr)", Plain) && notes.Success) { NoteFromPage("summarise", notes.Groups["book"].Value); i++; Thread.Sleep(1500); continue; }
         ShowThinking(job.Trigger + ": " + step, i + 1, steps.Length);
@@ -5245,6 +5246,22 @@ public class CapriInternalBrowser : ICapriMod
       string url = OnPage("(function(w){var re=new RegExp(w.replace(/ /g,'.?'),'i'),out=[];[].forEach.call(document.querySelectorAll('a[href]'),function(a){var r=a.getBoundingClientRect(),h=a.href;if(r.width<40||r.height<20||r.top>innerHeight*4||a.closest('nav,header,footer')||!/^https?:/.test(h)||h.split('#')[0]==location.href.split('#')[0])return;if(re.test(h)||re.test((a.innerText||'')+' '+(a.getAttribute('aria-label')||'')))out.push(h);});return out.length?out[Math.floor(Math.random()*out.length)]:'';})(" + Quote(m.Groups["w"].Value) + ")", out why);
       if (string.IsNullOrEmpty(url)) return "skipped \"" + step + "\" (no " + m.Groups["w"].Value + " on this page)";
       return BrowserTool("go " + url);
+    }
+    // "find a video to watch", "pick a song": her brain picks it from the page (and opens it if nothing comes after).
+    if (Regex.IsMatch(s, @"^(?:find|pick|choose|select|get)\s+(?!me\b)(?:a|an|some|one|something|anything|the\s+best|a\s+good|the\s+first|any)\b"))
+      return Agent(step);
+    // "click on video", "click it": the one she found; vague or missing words: her brain picks.
+    if ((m = Regex.Match(s, @"^(?:(?:click|press|tap|select)(?:\s+on)?|open|play|watch)\s+(?<w>.+)$")).Success)
+    {
+      string w = m.Groups["w"].Value, why;
+      bool vague = Regex.IsMatch(w, @"^(?:it|that|this|one|that\s+one|the\s+one|(?:a|an|the|one|any|some)?\s*(?:first\s+|top\s+|best\s+|good\s+)?(?:video|song|result|link|game|post|article|thing|item|product|episode|show)s?)$");
+      if (vague && OnPage("(function(){var e=document.querySelector('[data-capri-pick]');if(!e)return '';e.removeAttribute('data-capri-pick');e.scrollIntoView({block:'center'});" + Flash + "e.click();return 'ok';})()", out why) == "ok") { Settle(false); return null; }
+      if (vague) return Agent(step);
+      if (Regex.IsMatch(s, @"^(?:click|press|tap|select)"))
+      {
+        string did = Touchy1(BrowserTool("click " + step.Substring(step.Length - w.Length)));
+        return did != null && did.StartsWith("Nothing on the page says", StringComparison.Ordinal) ? Agent(step) : did;
+      }
     }
     // "summarise to work notes", "screenshot to my work notes": into that notebook.
     if ((m = Regex.Match(step, @"^(?<what>screen\s*shot|summari[sz]e)(?:\s+(?:it|this|the\s+page))?\s+(?:to|into|in)\s+(?:my\s+|the\s+)?(?<book>[\w' -]*?)\s*notes?(?:book)?$", Plain)).Success
@@ -5333,7 +5350,7 @@ public class CapriInternalBrowser : ICapriMod
       }
       if (any) return null;
     }
-    return "skipped \"" + step + "\" (not something she knows how to do)";
+    return theirs ? Agent(step) : "skipped \"" + step + "\" (not something she knows how to do)";
   }
 
   // Capri reading a page for a job: a scan line in her colours, paragraphs lighting up as she reads, and a box counting the
@@ -5366,6 +5383,67 @@ public class CapriInternalBrowser : ICapriMod
   private static string StepForms()
   {
     return string.Join(" | ", Browser.JobChips) + " | open <site> | open any website (no site named) | click any <thing> (picks one at random, like click any game) | open the website (the page that's open) | find <words> (on the page) | summarise to <name> notes | screenshot to <name> notes | put it in <name> notes | click <words on the page> | type <words> in the <box> | search <words> | find me <thing> | play <song or video> | scroll up | go back | new tab | close this tab | translate this page | remind me in <time> to <thing> | summarise <part of the page> | ask <question>";
+  }
+
+  // The step after the one running in a job ("" for the last).
+  private string stepAfter = "";
+
+  // What she can use on the page, numbered for her brain: links and buttons (not in menus, headers or sidebars) and
+  // boxes to type in (even in a header, where search boxes live; never password boxes).
+  private const string Choices = @"(function(){var o=[],n=0,seen={};[].forEach.call(document.querySelectorAll('[data-capri-c]'),function(e){e.removeAttribute('data-capri-c');});[].forEach.call(document.querySelectorAll('input:not([type=hidden]):not([type=password]):not([type=checkbox]):not([type=radio]),textarea,select,[contenteditable=true],[role=textbox],a[href],button,[role=button],[role=link],input[type=submit]'),function(e){if(n>=90)return;var r=e.getBoundingClientRect(),box=/^(INPUT|TEXTAREA|SELECT)$/.test(e.tagName)&&!/submit|button/.test(e.type)||e.isContentEditable||e.getAttribute('role')=='textbox';if(r.width<8||r.height<8||r.top>innerHeight*4||!box&&e.closest('nav,header,footer,aside,#guide,[role=navigation],[role=banner]'))return;var t=box?'box: '+(e.getAttribute('aria-label')||e.placeholder||e.name||e.title||'text')+(e.value?' (has: '+String(e.value).slice(0,40)+')':''):(e.innerText||e.getAttribute('aria-label')||e.title||e.value||'').replace(/\s+/g,' ').trim(),h=box?'':(e.getAttribute('href')||'').slice(0,60);if(t.length<2)return;var k=t+h;if(seen[k])return;seen[k]=1;e.setAttribute('data-capri-c',n);o.push(n+': '+t.slice(0,90)+(h?' ['+h+']':''));n++;});return o.join('\n');})()";
+
+  // One thing on the page by its number: pointed at, then clicked, marked for the next step, or typed into.
+  private const string UseChoice = @"(function(n,act,text){var e=document.querySelector('[data-capri-c=""'+n+'""]');if(!e)return '';e.scrollIntoView({block:'center'});if(act=='type'){if(e.type=='password'||/cc-|card/.test(e.autocomplete||''))return 'private';e.focus();if(e.isContentEditable||e.getAttribute('role')=='textbox'){document.execCommand('selectAll');document.execCommand('insertText',false,text);}else{var p=Object.getOwnPropertyDescriptor(e.tagName=='TEXTAREA'?HTMLTextAreaElement.prototype:e.tagName=='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype,'value');p.set.call(e,text);e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));}}else if(act=='pick'){[].forEach.call(document.querySelectorAll('[data-capri-pick]'),function(x){x.removeAttribute('data-capri-pick');});e.setAttribute('data-capri-pick','1');}else if(act=='click'){e.click();}";
+
+  private const string PressEnter = "(function(){var e=document.activeElement;if(!e||e==document.body)return '';['keydown','keypress','keyup'].forEach(function(k){e.dispatchEvent(new KeyboardEvent(k,{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true}));});if(e.form&&e.form.requestSubmit)setTimeout(function(){if(document.activeElement==e)try{e.form.requestSubmit();}catch(x){}},300);return 'ok';})()";
+
+  // A step done like a person would: look at the page, do one thing, look again, till her brain says it's done.
+  private string Agent(string step)
+  {
+    if (capri == null || !capri.Brain.Ready) return "skipped \"" + step + "\" (her brain's offline)";
+    List<string> did = new List<string>();
+    for (int round = 0; round < 8 && !stopped && !Halted; round++)
+    {
+      string why, title = null, url = null, answer = null;
+      string list = OnPage(Choices, out why);
+      if (list == null) return why;
+      InBrowser(delegate(Browser b) { title = b.FrontTitle; url = b.FrontAddress; return null; });
+      ManualResetEvent got = new ManualResetEvent(false);
+      try
+      {
+        capri.Brain.Ask("You're Capri, doing one step of the user's job yourself in their browser, a bit at a time, like a person would. Work out what the step means, look at what's on the page, and reply with the ONE next action, on one line:\n"
+          + "CLICK <number>\nTYPE <number> <text>\nENTER (presses Enter in the box you typed in)\nSCROLL (shows more of the page)\nGO <https link>\nPICK <number> (points at it, when the next step acts on it)\nDONE (the step is finished)\nNONE (it can't be done here)\n"
+          + "Do only this step, never the next one. Choose real things: an actual video, song, product or result, not ads, menus, filters, Shorts, cookie or sign-in buttons. Never type passwords or card details.",
+          "Step: \"" + Clip(step.Replace("\"", ""), 200) + "\"\nNext step (not yet): " + (stepAfter.Length > 0 ? stepAfter : "none, this is the last step") + "\nDone so far in this step: " + (did.Count == 0 ? "nothing" : string.Join("; ", did.ToArray()))
+          + "\nPage: " + title + " (" + url + ")\nOn the page:\n" + (list.Length > 0 ? list.Replace("<<<", "") : "(nothing to use)"), delegate(string a) { answer = a; got.Set(); });
+        got.WaitOne(45000);
+      }
+      catch { }
+      Match next = Regex.Match(answer ?? "", @"\b(CLICK|TYPE|ENTER|SCROLL|GO|PICK|DONE|NONE)\b[ \t:]*(\d+)?[ \t]*([^\r\n]*)");
+      if (!next.Success) break;
+      string act = next.Groups[1].Value, n = next.Groups[2].Value, text = next.Groups[3].Value.Trim().Trim('"');
+      capri.Log("job step \"" + step + "\": " + next.Value.Trim());
+      if (act == "DONE") return null;
+      if (act == "NONE") break;
+      if ((act == "CLICK" || act == "TYPE" || act == "ENTER") && Touchy.IsMatch("at " + url + " ")) return "skipped \"" + step + "\" (a messaging or social site: that one's yours to do)";
+      if (act == "SCROLL") { OnPage("(function(){scrollBy(0,innerHeight*.8);return 'ok';})()", out why); did.Add("scrolled"); }
+      else if (act == "ENTER") { OnPage(PressEnter, out why); did.Add("pressed Enter"); Settle(false); }
+      else if (act == "GO" && Regex.IsMatch(text, "^https?://", Plain)) { BrowserTool("go " + text); did.Add("went to " + text); }
+      else if (n.Length > 0)
+      {
+        string spot = "(function(){var e=document.querySelector('[data-capri-c=\"" + n + "\"]');if(!e)return '';e.scrollIntoView({block:'center'});" + SpotTail + "()";
+        if (act != "TYPE") Aim(spot, false);
+        string used = OnPage(UseChoice + Flash + "return (e.innerText||e.value||e.getAttribute('aria-label')||'').replace(/\\s+/g,' ').trim().slice(0,60)||'it';})(" + n + "," + Quote(act.ToLowerInvariant()) + "," + Quote(text) + ")", out why);
+        if (used == "private") return "skipped \"" + step + "\" (it needs a password or card details: that's yours to type)";
+        if (string.IsNullOrEmpty(used)) { did.Add("tried " + n + " but it was gone"); continue; }
+        if (act == "PICK") return null;
+        did.Add((act == "TYPE" ? "typed \"" + text + "\" into " : "clicked ") + used);
+        if (act == "CLICK") Settle(false);
+      }
+      else break;
+      Thread.Sleep(500);
+    }
+    return did.Count > 0 ? null : "skipped \"" + step + "\" (couldn't see how to do it on this page)";
   }
 
   // A step in their own words, as one she knows (or null). Remembered till Capri closes, so each wording is asked once.
