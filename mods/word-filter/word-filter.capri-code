@@ -1,288 +1,288 @@
-// capri-mod: 1
-// id: word-filter
-// name: Word Filter
-// version: 1.0.0
-// author: Quaisar_THM
-// description: Removes words you don't want her to say from both her chat replies and what she speaks. Starts with choom and good boy/girl; add your own in Options.
-// requires: api 3
-// permissions: chat, voice
-
-using System;
-using System.Text.RegularExpressions;
-using CapriDesktop;
-using System.Collections.Generic;
-using System.Drawing;
-using System.Windows.Forms;
-
-public class CleanLines : ICapriMod
-{
-    const RegexOptions Words = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
-    // Her voice spells it "chewm" so it's said right, so both spellings go.
-    const string Choom = @"ch(?:oo|ew)ms?";
-    Regex AfterComma, Leading, Anywhere;     // built from the options; null = nothing to remove
-    bool goodBoy = true;
-    Opts opts;
-    static readonly Regex GoodBoy = new Regex(@"[^.!?]*\bgood (?:boy|girl)\b[^.!?]*[.!?]?\s*", Words);
-    static readonly Regex Spaces = new Regex(@"[ \t]{2,}");
-    static readonly Regex BeforeMark = new Regex(@"\s+(?=[,.!?])");
-
-    ICapriHost capri;
-    Action<CapriMessage> clean;
-
-    public void Start(ICapriHost host)
-    {
-        capri = host;
-        if (opts == null)
-        {
-            opts = new Opts(host, "Word Filter");
-            opts.Section("What she never says");
-            opts.Toggle("Remove \"choom\" (and \"chewm\", her voice's spelling of it)", "choom", true, delegate(bool v) { Build(); });
-            opts.Toggle("Remove sentences with \"good boy\" or \"good girl\"", "goodboy", true, delegate(bool v) { goodBoy = v; });
-            opts.Text("Other words or phrases to remove, comma separated", "extra", "", delegate(string v) { Build(); });
-            opts.Note("Works on both her chat replies and the lines she says out loud. A line that was only those words becomes \"Nice.\"");
-        }
-        Build();
-        goodBoy = opts.Flag("goodboy", true);
-        try
-        {
-            clean = delegate(CapriMessage message) { message.Text = Clean(message.Text); };
-            host.Chat.Replying += clean;
-            host.Voice.Speaking += clean;
-            capri.Log("Word Filter: no choom, no good boy.");
-        }
-        catch (Exception e)
-        {
-            capri.Log("Word Filter could not start: " + e.Message);
-        }
-    }
-
-    public bool Heard(string words) { return false; }
-
-    public void Stop()
-    {
-        try
-        {
-            if (capri != null && clean != null)
-            {
-                capri.Chat.Replying -= clean;
-                capri.Voice.Speaking -= clean;
-            }
-        }
-        catch (Exception) { }
-    }
-
-    void Build()
-    {
-        List<string> words = new List<string>();
-        if (opts.Flag("choom", true)) words.Add(Choom);
-        foreach (string w in Opts.Words(opts.Str("extra", ""))) words.Add(Regex.Escape(w) + "s?");
-        if (words.Count == 0) { AfterComma = Leading = Anywhere = null; return; }
-        string any = "(?:" + string.Join("|", words.ToArray()) + ")";
-        AfterComma = new Regex(@"\s*,\s*" + any + @"\b", Words);
-        Leading = new Regex(@"^(\W*)" + any + @"\b\s*[,!.]?\s*", Words);
-        Anywhere = new Regex(@"\b" + any + @"\b\s*", Words);
-    }
-
-    string Clean(string line)
-    {
-        if (string.IsNullOrEmpty(line)) return line;
-        string text = line;
-        Regex afterComma = AfterComma, leading = Leading, anywhere = Anywhere;
-        if (afterComma != null)
-        {
-            text = afterComma.Replace(text, "");
-            Match lead = leading.Match(text);
-            if (lead.Success) text = lead.Groups[1].Value + Capital(text.Substring(lead.Length));
-            text = anywhere.Replace(text, "");
-        }
-        if (goodBoy) text = GoodBoy.Replace(text, "");
-        text = BeforeMark.Replace(Spaces.Replace(text, " "), "").Trim();
-        // A line that was only those words becomes a plain nod, never empty.
-        return text.Length == 0 ? "Nice." : text;
-    }
-
-    static string Capital(string s) { return s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s.Substring(1); }
-}
-
-// ---- Options page (Quaisar_THM's shared toolkit) -------------------------------
-// An Options page under Mainframe > Mods, in her colours. Every value lives in
-// this mod's own Store, so it survives restarts and updates. Toggles and
-// numbers apply as you change them; text applies on Enter or when you click away.
-sealed class Opts
-{
-    static readonly Color Back = Color.FromArgb(16, 15, 8), Ink = Color.FromArgb(236, 236, 241),
-        Dim = Color.FromArgb(150, 146, 120), Yellow = Color.FromArgb(252, 239, 3),
-        Cyan = Color.FromArgb(5, 202, 237), Field = Color.FromArgb(30, 29, 14), Edge = Color.FromArgb(90, 86, 10);
-    const int Wide = 690, Right = 470;
-
-    delegate int Row(Control page, int y);
-    readonly ICapriHost host;
-    readonly List<Row> rows = new List<Row>();
-
-    public Opts(ICapriHost host, string title)
-    {
-        this.host = host;
-        host.Ui.SetOptions(title, Build);
-    }
-
-    // Reading values, with sane fallbacks for anything missing or out of range.
-    public bool Flag(string key, bool def) { try { return host.Store.Flag(key, def); } catch (Exception) { return def; } }
-    public double Num(string key, double def, double min, double max)
-    {
-        double v;
-        try { v = host.Store.Number(key, def); } catch (Exception) { v = def; }
-        return double.IsNaN(v) ? def : Math.Max(min, Math.Min(max, v));
-    }
-    public string Str(string key, string def)
-    {
-        try { string v = host.Store.Get(key, def); return v ?? def; } catch (Exception) { return def; }
-    }
-
-    public void Section(string title)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            System.Windows.Forms.Label l = Text(title.ToUpperInvariant(), 18, y + (y > 14 ? 10 : 0), Wide);
-            l.ForeColor = Cyan;
-            l.Font = new Font("Segoe UI Semibold", 9.5f);
-            p.Controls.Add(l);
-            return l.Bottom + 8;
-        });
-    }
-
-    public void Note(string text)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            System.Windows.Forms.Label l = Text(text, 18, y, Wide);
-            l.ForeColor = Dim;
-            l.Font = new Font("Segoe UI", 8.5f);
-            l.Height = TextRenderer.MeasureText(text, l.Font, new Size(Wide, 0), TextFormatFlags.WordBreak).Height + 4;
-            p.Controls.Add(l);
-            return l.Bottom + 8;
-        });
-    }
-
-    public void Toggle(string label, string key, bool def, Action<bool> changed)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
-            Button off = Pill("OFF", Right + 50, y), on = Pill("ON", Right + 140, y);
-            MethodInvoker paint = delegate
-            {
-                bool v = Flag(key, def);
-                Lit(on, v);
-                Lit(off, !v);
-            };
-            off.Click += delegate { Save(key, false); paint(); Tell(changed, false); };
-            on.Click += delegate { Save(key, true); paint(); Tell(changed, true); };
-            paint();
-            p.Controls.Add(off);
-            p.Controls.Add(on);
-            return y + 42;
-        });
-    }
-
-    public void Number(string label, string key, double def, double min, double max, double step, int decimals, Action<double> changed)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
-            NumericUpDown box = new NumericUpDown
-            {
-                Left = Right + 50, Top = y + 2, Width = 170, DecimalPlaces = decimals,
-                Minimum = (decimal)min, Maximum = (decimal)max, Increment = (decimal)step,
-                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 10f), TextAlign = HorizontalAlignment.Center,
-            };
-            box.Value = (decimal)Num(key, def, min, max);
-            box.ValueChanged += delegate
-            {
-                double v = (double)box.Value;
-                try { host.Store.Set(key, v); } catch (Exception) { }
-                Tell(changed, v);
-            };
-            p.Controls.Add(box);
-            return y + 42;
-        });
-    }
-
-    public void Text(string label, string key, string def, Action<string> changed)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            p.Controls.Add(Text(label, 18, y, Wide));
-            TextBox box = new TextBox
-            {
-                Left = 18, Top = y + 24, Width = Wide, Text = Str(key, def),
-                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 10f),
-            };
-            string applied = box.Text;
-            MethodInvoker apply = delegate
-            {
-                if (box.Text == applied) return;
-                applied = box.Text;
-                try { host.Store.Set(key, applied); } catch (Exception) { }
-                Tell(changed, applied);
-            };
-            box.Leave += delegate { apply(); };
-            box.KeyDown += delegate(object s, KeyEventArgs e)
-            {
-                if (e.KeyCode != Keys.Enter) return;
-                e.SuppressKeyPress = true;
-                apply();
-            };
-            p.Controls.Add(box);
-            return box.Bottom + 12;
-        });
-    }
-
-    Control Build()
-    {
-        Panel page = new Panel { Width = Wide + 36, BackColor = Back, ForeColor = Ink, Font = new Font("Segoe UI", 9.5f) };
-        int y = 14;
-        foreach (Row r in rows) y = r(page, y);
-        page.Height = y + 10;
-        return page;
-    }
-
-    void Save(string key, bool v) { try { host.Store.Set(key, v); } catch (Exception) { } }
-
-    // A setting that fails to apply is logged, never thrown into her window.
-    void Tell<T>(Action<T> changed, T value)
-    {
-        if (changed == null) return;
-        try { changed(value); }
-        catch (Exception e) { try { host.Log("Options: " + e.Message); } catch (Exception) { } }
-    }
-
-    static System.Windows.Forms.Label Text(string text, int x, int y, int width)
-    {
-        return new System.Windows.Forms.Label { Text = text, Left = x, Top = y, Width = width, AutoSize = false, Height = 22, ForeColor = Ink, BackColor = Color.Transparent };
-    }
-
-    static Button Pill(string text, int x, int y)
-    {
-        Button b = new Button { Text = text, Left = x, Top = y, Width = 84, Height = 30, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Default, Font = new Font("Segoe UI Semibold", 9f) };
-        b.FlatAppearance.BorderColor = Edge;
-        return b;
-    }
-
-    static void Lit(Button b, bool lit)
-    {
-        b.BackColor = lit ? Yellow : Field;
-        b.ForeColor = lit ? Back : Ink;
-        b.FlatAppearance.BorderColor = lit ? Yellow : Edge;
-    }
-
-    // "a, b ,c" -> ["a","b","c"], blanks dropped.
-    public static List<string> Words(string list)
-    {
-        List<string> words = new List<string>();
-        foreach (string w in (list ?? "").Split(','))
-            if (w.Trim().Length > 0) words.Add(w.Trim());
-        return words;
-    }
-}
+// capri-mod: 1
+// id: word-filter
+// name: Word Filter
+// version: 1.0.1
+// author: Quaisar_THM
+// description: Removes words you don't want her to say from both her chat replies and what she speaks. Starts with choom and good boy/girl; add your own in Options.
+// requires: api 3
+// permissions: chat, voice
+
+using System;
+using System.Text.RegularExpressions;
+using CapriDesktop;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Windows.Forms;
+
+public class CleanLines : ICapriMod
+{
+    const RegexOptions Words = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+    // Her voice spells it "chewm" so it's said right, so both spellings go.
+    const string Choom = @"ch(?:oo|ew)ms?";
+    Regex AfterComma, Leading, Anywhere;     // built from the options; null = nothing to remove
+    bool goodBoy = true;
+    Opts opts;
+    static readonly Regex GoodBoy = new Regex(@"[^.!?]*\bgood (?:boy|girl)\b[^.!?]*[.!?]?\s*", Words);
+    static readonly Regex Spaces = new Regex(@"[ \t]{2,}");
+    static readonly Regex BeforeMark = new Regex(@"\s+(?=[,.!?])");
+
+    ICapriHost capri;
+    Action<CapriMessage> clean;
+
+    public void Start(ICapriHost host)
+    {
+        capri = host;
+        if (opts == null)
+        {
+            opts = new Opts(host, "Word Filter");
+            opts.Section("What she never says");
+            opts.Toggle("Remove \"choom\" (and \"chewm\", her voice's spelling of it)", "choom", true, delegate(bool v) { Build(); });
+            opts.Toggle("Remove sentences with \"good boy\" or \"good girl\"", "goodboy", true, delegate(bool v) { goodBoy = v; });
+            opts.Text("Other words or phrases to remove, comma separated", "extra", "", delegate(string v) { Build(); });
+            opts.Note("Works on both her chat replies and the lines she says out loud. A line that was only those words becomes \"Nice.\"");
+        }
+        Build();
+        goodBoy = opts.Flag("goodboy", true);
+        try
+        {
+            clean = delegate(CapriMessage message) { message.Text = Clean(message.Text); };
+            host.Chat.Replying += clean;
+            host.Voice.Speaking += clean;
+            capri.Log("Word Filter: no choom, no good boy.");
+        }
+        catch (Exception e)
+        {
+            capri.Log("Word Filter could not start: " + e.Message);
+        }
+    }
+
+    public bool Heard(string words) { return false; }
+
+    public void Stop()
+    {
+        try
+        {
+            if (capri != null && clean != null)
+            {
+                capri.Chat.Replying -= clean;
+                capri.Voice.Speaking -= clean;
+            }
+        }
+        catch (Exception) { }
+    }
+
+    void Build()
+    {
+        List<string> words = new List<string>();
+        if (opts.Flag("choom", true)) words.Add(Choom);
+        foreach (string w in Opts.Words(opts.Str("extra", ""))) words.Add(Regex.Escape(w) + "s?");
+        if (words.Count == 0) { AfterComma = Leading = Anywhere = null; return; }
+        string any = "(?:" + string.Join("|", words.ToArray()) + ")";
+        AfterComma = new Regex(@"\s*,\s*" + any + @"\b", Words);
+        Leading = new Regex(@"^(\W*)" + any + @"\b\s*[,!.]?\s*", Words);
+        Anywhere = new Regex(@"\b" + any + @"\b\s*", Words);
+    }
+
+    string Clean(string line)
+    {
+        if (string.IsNullOrEmpty(line)) return line;
+        string text = line;
+        Regex afterComma = AfterComma, leading = Leading, anywhere = Anywhere;
+        if (afterComma != null)
+        {
+            text = afterComma.Replace(text, "");
+            Match lead = leading.Match(text);
+            if (lead.Success) text = lead.Groups[1].Value + Capital(text.Substring(lead.Length));
+            text = anywhere.Replace(text, "");
+        }
+        if (goodBoy) text = GoodBoy.Replace(text, "");
+        text = BeforeMark.Replace(Spaces.Replace(text, " "), "").Trim();
+        // A line that was only those words becomes a plain nod, never empty.
+        return text.Length == 0 ? "Nice." : text;
+    }
+
+    static string Capital(string s) { return s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s.Substring(1); }
+}
+
+// ---- Options page (Quaisar_THM's shared toolkit) -------------------------------
+// An Options page under Mainframe > Mods, in her colours. Every value lives in
+// this mod's own Store, so it survives restarts and updates. Toggles and
+// numbers apply as you change them; text applies on Enter or when you click away.
+sealed class Opts
+{
+    static readonly Color Back = Color.FromArgb(16, 15, 8), Ink = Color.FromArgb(236, 236, 241),
+        Dim = Color.FromArgb(150, 146, 120), Yellow = Color.FromArgb(252, 239, 3),
+        Cyan = Color.FromArgb(5, 202, 237), Field = Color.FromArgb(30, 29, 14), Edge = Color.FromArgb(90, 86, 10);
+    const int Wide = 690, Right = 470;
+
+    delegate int Row(Control page, int y);
+    readonly ICapriHost host;
+    readonly List<Row> rows = new List<Row>();
+
+    public Opts(ICapriHost host, string title)
+    {
+        this.host = host;
+        host.Ui.SetOptions(title, Build);
+    }
+
+    // Reading values, with sane fallbacks for anything missing or out of range.
+    public bool Flag(string key, bool def) { try { return host.Store.Flag(key, def); } catch (Exception) { return def; } }
+    public double Num(string key, double def, double min, double max)
+    {
+        double v;
+        try { v = host.Store.Number(key, def); } catch (Exception) { v = def; }
+        return double.IsNaN(v) ? def : Math.Max(min, Math.Min(max, v));
+    }
+    public string Str(string key, string def)
+    {
+        try { string v = host.Store.Get(key, def); return v ?? def; } catch (Exception) { return def; }
+    }
+
+    public void Section(string title)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            System.Windows.Forms.Label l = Text(title.ToUpperInvariant(), 18, y + (y > 14 ? 10 : 0), Wide);
+            l.ForeColor = Cyan;
+            l.Font = new Font("Segoe UI Semibold", 9.5f);
+            p.Controls.Add(l);
+            return l.Bottom + 8;
+        });
+    }
+
+    public void Note(string text)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            System.Windows.Forms.Label l = Text(text, 18, y, Wide);
+            l.ForeColor = Dim;
+            l.Font = new Font("Segoe UI", 8.5f);
+            l.Height = TextRenderer.MeasureText(text, l.Font, new Size(Wide, 0), TextFormatFlags.WordBreak).Height + 4;
+            p.Controls.Add(l);
+            return l.Bottom + 8;
+        });
+    }
+
+    public void Toggle(string label, string key, bool def, Action<bool> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
+            Button off = Pill("OFF", Right + 50, y), on = Pill("ON", Right + 140, y);
+            MethodInvoker paint = delegate
+            {
+                bool v = Flag(key, def);
+                Lit(on, v);
+                Lit(off, !v);
+            };
+            off.Click += delegate { Save(key, false); paint(); Tell(changed, false); };
+            on.Click += delegate { Save(key, true); paint(); Tell(changed, true); };
+            paint();
+            p.Controls.Add(off);
+            p.Controls.Add(on);
+            return y + 42;
+        });
+    }
+
+    public void Number(string label, string key, double def, double min, double max, double step, int decimals, Action<double> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
+            NumericUpDown box = new NumericUpDown
+            {
+                Left = Right + 50, Top = y + 2, Width = 170, DecimalPlaces = decimals,
+                Minimum = (decimal)min, Maximum = (decimal)max, Increment = (decimal)step,
+                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f), TextAlign = HorizontalAlignment.Center,
+            };
+            box.Value = (decimal)Num(key, def, min, max);
+            box.ValueChanged += delegate
+            {
+                double v = (double)box.Value;
+                try { host.Store.Set(key, v); } catch (Exception) { }
+                Tell(changed, v);
+            };
+            p.Controls.Add(box);
+            return y + 42;
+        });
+    }
+
+    public void Text(string label, string key, string def, Action<string> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y, Wide));
+            TextBox box = new TextBox
+            {
+                Left = 18, Top = y + 24, Width = Wide, Text = Str(key, def),
+                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f),
+            };
+            string applied = box.Text;
+            MethodInvoker apply = delegate
+            {
+                if (box.Text == applied) return;
+                applied = box.Text;
+                try { host.Store.Set(key, applied); } catch (Exception) { }
+                Tell(changed, applied);
+            };
+            box.Leave += delegate { apply(); };
+            box.KeyDown += delegate(object s, KeyEventArgs e)
+            {
+                if (e.KeyCode != Keys.Enter) return;
+                e.SuppressKeyPress = true;
+                apply();
+            };
+            p.Controls.Add(box);
+            return box.Bottom + 12;
+        });
+    }
+
+    Control Build()
+    {
+        Panel page = new Panel { Width = Wide + 36, BackColor = Back, ForeColor = Ink, Font = new Font("Segoe UI", 9.5f) };
+        int y = 14;
+        foreach (Row r in rows) y = r(page, y);
+        page.Height = y + 10;
+        return page;
+    }
+
+    void Save(string key, bool v) { try { host.Store.Set(key, v); } catch (Exception) { } }
+
+    // A setting that fails to apply is logged, never thrown into her window.
+    void Tell<T>(Action<T> changed, T value)
+    {
+        if (changed == null) return;
+        try { changed(value); }
+        catch (Exception e) { try { host.Log("Options: " + e.Message); } catch (Exception) { } }
+    }
+
+    static System.Windows.Forms.Label Text(string text, int x, int y, int width)
+    {
+        return new System.Windows.Forms.Label { Text = text, Left = x, Top = y, Width = width, AutoSize = false, Height = 22, ForeColor = Ink, BackColor = Color.Transparent };
+    }
+
+    static Button Pill(string text, int x, int y)
+    {
+        Button b = new Button { Text = text, Left = x, Top = y, Width = 84, Height = 30, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Default, Font = new Font("Segoe UI Semibold", 9f) };
+        b.FlatAppearance.BorderColor = Edge;
+        return b;
+    }
+
+    static void Lit(Button b, bool lit)
+    {
+        b.BackColor = lit ? Yellow : Field;
+        b.ForeColor = lit ? Back : Ink;
+        b.FlatAppearance.BorderColor = lit ? Yellow : Edge;
+    }
+
+    // "a, b ,c" -> ["a","b","c"], blanks dropped.
+    public static List<string> Words(string list)
+    {
+        List<string> words = new List<string>();
+        foreach (string w in (list ?? "").Split(','))
+            if (w.Trim().Length > 0) words.Add(w.Trim());
+        return words;
+    }
+}
