@@ -1,1404 +1,1404 @@
-// capri-mod: 1
-// id: dm-capri
-// name: DM Capri!
-// version: 1.0.0
-// author: Quaisar_THM
-// description: Your chats with her Discord-style, from her right-click menu: avatars, links, pictures, search, and a chat bar to message her with Shift+Enter and picture pasting.
-// requires: api 3
-// permissions: transcripts, chat
-
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Globalization;
-using System.IO;
-using System.Runtime.InteropServices;
-using System.Reflection;
-using System.Text.RegularExpressions;
-using System.Windows.Forms;
-using CapriDesktop;
-
-public class ChatLog : ICapriMod
-{
-    ICapriHost capri;
-    LogWindow window;
-    Opts opts;
-
-    public void Start(ICapriHost host)
-    {
-        capri = host;
-        if (opts == null)
-        {
-            opts = new Opts(host, "DM Capri!");
-            opts.Section("Chat button");
-            opts.Toggle("Show a chat button next to TYPE / TALK", "button", true, delegate(bool v) { if (v) StartButton(); else StopButton(); });
-            opts.Section("Look");
-            opts.Number("Screenshot size in the log (pixels)", "picture", 300, 100, 900, 20, 0, delegate(double v) { Feed.MaxPicture = (int)v; });
-            opts.Number("Text size", "text", 10.5, 8, 18, 0.5, 1, delegate(double v) { Feed.TextSize = (float)v; });
-            opts.Note("Changes show the next time you open DM Capri!.");
-        }
-        Feed.MaxPicture = (int)opts.Num("picture", 300, 100, 900);
-        Feed.TextSize = (float)opts.Num("text", 10.5, 8, 18);
-        try
-        {
-            host.Ui.AddMenuItem("DM Capri!", Open);
-            if (opts.Flag("button", true)) StartButton();
-            capri.Log("DM Capri!: open it from her right-click menu.");
-        }
-        catch (Exception e) { capri.Log("DM Capri! could not start: " + e.Message); }
-    }
-
-    public bool Heard(string words) { return false; }
-
-    public void Stop()
-    {
-        StopButton();
-        LogWindow w = window;
-        window = null;
-        if (w != null && !w.IsDisposed) w.BeginInvoke((MethodInvoker)delegate { w.Close(); });
-    }
-
-    const BindingFlags Inst = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
-    const BindingFlags Stat = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-
-    static Form Her()
-    {
-        try
-        {
-            foreach (Form f in Application.OpenForms)
-                if (f.GetType().FullName == "CapriDesktop.Companion" && f.IsHandleCreated) return f;
-        }
-        catch (InvalidOperationException) { }
-        return null;
-    }
-
-    // Queues pictures with her brain; the next thing she hears takes them along.
-    // Returns the names she gave them, or null.
-    static string Give(string[] paths)
-    {
-        Form her = Her();
-        if (her == null) return null;
-        object brain = her.GetType().GetField("brain", Inst).GetValue(her);
-        object files = brain.GetType().GetField("Attachments", Inst).GetValue(brain);
-        return (string)files.GetType().GetMethod("Give", Inst).Invoke(files, new object[] { paths });
-    }
-
-    // Pictures with no words: exactly what dropping files on her does.
-    // Hear(text, shown, prompt, ...) where everything after the third is optional.
-    static void Drop(string names)
-    {
-        Form her = Her();
-        if (her == null) return;
-        string dropped = (string)typeof(ICapriHost).Assembly.GetType("CapriDesktop.Files", true).GetField("Dropped", Stat).GetRawConstantValue();
-        foreach (MethodInfo m in her.GetType().GetMethods(Inst))
-        {
-            ParameterInfo[] ps = m.GetParameters();
-            if (m.Name != "Hear" || ps.Length < 3) continue;
-            bool fits = ps[0].ParameterType == typeof(string) && ps[1].ParameterType == typeof(string) && ps[2].ParameterType == typeof(string);
-            for (int i = 3; i < ps.Length && fits; i++) fits = ps[i].IsOptional;
-            if (!fits) continue;
-            object[] values = new object[ps.Length];
-            values[0] = dropped; values[1] = names; values[2] = "> file: ";
-            for (int i = 3; i < ps.Length; i++) values[i] = ps[i].DefaultValue;
-            her.BeginInvoke((MethodInvoker)delegate { m.Invoke(her, values); });
-            return;
-        }
-    }
-
-    // ---- The chat button beside her TYPE/TALK pill --------------------------
-    // Made from Capri's own parts: her floating Overlay window and TalkPill's
-    // button plate, so it looks like the buttons already there. It follows the
-    // pill as it moves, scales and hides.
-    const BindingFlags Any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
-    const int Side = 40, Gap = 4;
-    Form herWindow, pill, button;
-    FieldInfo pillUntil, pillCentre, pillScale;
-    PropertyInfo chatting;
-    MethodInfo talkScale, present, plate;
-    Stopwatch clock;
-    Color cyan, ink;
-    System.Windows.Forms.Timer follow;
-    bool hover, drawnHover;
-    float drawnScale = -1;
-    Rectangle drawnAt;
-
-    void StartButton()
-    {
-        Form f = Her();
-        if (f == null) { capri.Timers.After(1, delegate { if (opts.Flag("button", true) && button == null) StartButton(); }); return; }
-        f.BeginInvoke((MethodInvoker)delegate
-        {
-            try
-            {
-                herWindow = f;
-                Assembly app = typeof(ICapriHost).Assembly;
-                Type pillType = app.GetType("CapriDesktop.TalkPill", true), look = app.GetType("CapriDesktop.Look", true), overlay = app.GetType("CapriDesktop.Overlay", true);
-                pill = (Form)Need(f.GetType().GetField("pill", Any), "pill").GetValue(f);
-                pillUntil = Need(f.GetType().GetField("pillUntil", Any), "pillUntil");
-                clock = (Stopwatch)Need(f.GetType().GetField("clock", Any), "clock").GetValue(f);
-                talkScale = Need(f.GetType().GetMethod("TalkScale", Any, null, Type.EmptyTypes, null), "TalkScale");
-                plate = Need(pillType.GetMethod("Plate", Any), "TalkPill.Plate");
-                pillCentre = Need(pillType.GetField("centre", Any), "TalkPill.centre");
-                pillScale = Need(pillType.GetField("scale", Any), "TalkPill.scale");
-                chatting = Need(pillType.GetProperty("Chatting", Any), "TalkPill.Chatting");
-                present = Need(overlay.GetMethod("Present", Any), "Overlay.Present");
-                cyan = (Color)Need(look.GetField("Cyan", Any), "Look.Cyan").GetValue(null);
-                ink = (Color)Need(look.GetField("Ink", Any), "Look.Ink").GetValue(null);
-                Cursor pointer = (Cursor)look.GetProperty("Pointer", Any).GetValue(null, null);
-                button = (Form)Activator.CreateInstance(overlay, Any, null, new object[] { "DM Capri!" }, null);
-                button.Cursor = pointer;
-                button.Owner = f;
-                button.MouseUp += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) Open(); };
-                follow = new System.Windows.Forms.Timer { Interval = 15 };
-                follow.Tick += delegate { Follow(); };
-                follow.Start();
-            }
-            catch (Exception e)
-            {
-                // A Capri update that renames one of these just means no button; the menu item still works.
-                capri.Log("DM Capri!: no chat button on this Capri (" + e.Message + ")");
-                StopButton();
-            }
-        });
-    }
-
-    void StopButton()
-    {
-        Form f = herWindow;
-        MethodInvoker stop = delegate
-        {
-            if (follow != null) { follow.Dispose(); follow = null; }
-            if (button != null) { button.Dispose(); button = null; }
-            drawnScale = -1;
-        };
-        try { if (f != null && f.IsHandleCreated && f.InvokeRequired) f.BeginInvoke(stop); else stop(); }
-        catch (Exception) { }
-    }
-
-    static T Need<T>(T found, string name) where T : class
-    {
-        if (found == null) throw new MissingMemberException(name + " is missing");
-        return found;
-    }
-
-    // Left of TYPE/TALK, and left of the mute button when that mod is on. Near the
-    // left edge of the screen it goes to the right instead, past the mic button.
-    Rectangle Spot(float sc, Point c, bool chat)
-    {
-        int slot = 1;
-        try { if (capri.Mods.IsRunning("mute-button")) slot = 2; } catch (Exception) { }
-        int side = (int)Math.Round(Side * sc), gap = (int)Math.Round(Gap * sc), wide = (int)Math.Round(100 * sc), pillLeft = c.X - wide / 2;
-        Rectangle at = new Rectangle(pillLeft - slot * (gap + side), c.Y, side, side);
-        if (at.Left < Screen.FromPoint(c).WorkingArea.Left)
-            at.X = pillLeft + wide + gap + (chat ? (int)Math.Round(40 * sc) + gap : 0) + (slot - 1) * (side + gap);
-        return at;
-    }
-
-    static Rectangle Body(float sc)
-    {
-        int side = (int)Math.Round(Side * Math.Max(sc, 0.1f)), margin = (int)Math.Round(3 * sc);
-        return new Rectangle(margin, margin, side - margin * 2, side - margin * 2);
-    }
-
-    void Follow()
-    {
-        if (button == null || button.IsDisposed || pill == null) return;
-        bool showing = pill.IsHandleCreated && pill.Visible && IsWindowVisible(pill.Handle);
-        if (!showing) { if (button.Visible) button.Hide(); hover = false; return; }
-        float sc = (float)pillScale.GetValue(pill);
-        if (sc < 0.5f || sc > 8) sc = (float)talkScale.Invoke(herWindow, null);
-        Rectangle want = Spot(sc, (Point)pillCentre.GetValue(pill), (bool)chatting.GetValue(pill, null));
-        Point cursor = Cursor.Position;
-        hover = button.Visible && want.Contains(cursor) && Body(sc).Contains(new Point(cursor.X - want.X, cursor.Y - want.Y));
-        // While you're on the button the pill stays up, like hovering the pill itself.
-        if (hover) pillUntil.SetValue(herWindow, Math.Max((double)pillUntil.GetValue(herWindow), clock.Elapsed.TotalSeconds + 1.5));
-        if (button.Visible && want == drawnAt && sc == drawnScale && hover == drawnHover) return;
-        drawnAt = want; drawnScale = sc; drawnHover = hover;
-        present.Invoke(button, new object[] { Render(sc, hover), want.Location });
-    }
-
-    Bitmap Render(float sc, bool lit)
-    {
-        int side = (int)Math.Round(Side * sc);
-        Bitmap image = new Bitmap(side, side, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
-        using (Graphics g = Graphics.FromImage(image))
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            Rectangle body = Body(sc);
-            plate.Invoke(null, new object[] { g, body, sc, lit ? body : Rectangle.Empty, cyan, cyan });
-            DrawBubble(g, new PointF(body.Left + body.Width / 2f, body.Top + body.Height / 2f), sc, lit ? cyan : ink);
-        }
-        return image;
-    }
-
-    // A speech bubble with a tail and three dots.
-    static void DrawBubble(Graphics g, PointF c, float sc, Color colour)
-    {
-        float w = 17 * sc, h = 12 * sc, r = 3.5f * sc, x = c.X - w / 2, y = c.Y - h / 2 - 1.5f * sc;
-        using (GraphicsPath bubble = new GraphicsPath())
-        {
-            bubble.AddArc(x, y, 2 * r, 2 * r, 180, 90);
-            bubble.AddArc(x + w - 2 * r, y, 2 * r, 2 * r, 270, 90);
-            bubble.AddArc(x + w - 2 * r, y + h - 2 * r, 2 * r, 2 * r, 0, 90);
-            bubble.AddLine(x + w * 0.45f, y + h, x + w * 0.22f, y + h + 4.5f * sc);    // the tail
-            bubble.AddLine(x + w * 0.24f, y + h, x + w * 0.24f, y + h);
-            bubble.AddArc(x, y + h - 2 * r, 2 * r, 2 * r, 90, 90);
-            bubble.CloseFigure();
-            using (Pen pen = new Pen(colour, 1.8f * sc)) { pen.LineJoin = LineJoin.Round; g.DrawPath(pen, bubble); }
-        }
-        using (Brush dot = new SolidBrush(colour))
-            for (int i = -1; i <= 1; i++)
-                g.FillEllipse(dot, c.X + i * 4.2f * sc - 1.2f * sc, y + h / 2 - 1.2f * sc, 2.4f * sc, 2.4f * sc);
-    }
-
-    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
-
-    // Her avatar: the first frame of her face (or idle) sprite strip, as a square.
-    static Image Face(ICapriHost h)
-    {
-        foreach (string strip in new[] { "face", "idle" })
-        {
-            try
-            {
-                using (Bitmap art = h.Art(strip))
-                {
-                    if (art == null || art.Height <= 0) continue;
-                    int side = Math.Min(art.Width, art.Height);
-                    Bitmap frame = new Bitmap(side, side);
-                    using (Graphics g = Graphics.FromImage(frame))
-                    {
-                        g.InterpolationMode = InterpolationMode.NearestNeighbor;
-                        g.DrawImage(art, new Rectangle(0, 0, side, side), new Rectangle(0, 0, side, side), GraphicsUnit.Pixel);
-                    }
-                    return frame;
-                }
-            }
-            catch (Exception) { }
-        }
-        return null;
-    }
-
-    void Open()
-    {
-        Form f = Her();
-        if (f != null && f.InvokeRequired) { f.BeginInvoke((MethodInvoker)Open); return; }
-        if (window == null || window.IsDisposed)
-        {
-            ICapriHost h = capri;
-            // Pasted screenshots live in the paste mod's folder, beside this one.
-            string pictures = Path.Combine(Directory.GetParent(h.Folder).FullName, "paste-pictures-data");
-            string transcripts = Path.Combine(Directory.GetParent(Directory.GetParent(h.Folder).FullName).FullName, "transcripts");
-            window = new LogWindow(delegate { return h.Chat.Days(); }, delegate(DateTime d) { return h.Chat.Transcript(d); },
-                                   delegate(string text) { h.Chat.Send(text); }, Give, Drop, delegate { return h.Chat.Busy; },
-                                   Face(h), pictures, transcripts, delegate(string s) { h.Log("DM Capri!: " + s); });
-        }
-        window.Show();
-        if (window.WindowState == FormWindowState.Minimized) window.WindowState = FormWindowState.Normal;
-        window.Activate();
-    }
-}
-
-// One thing in the log: something said, something she did, or a picture.
-public sealed class Entry
-{
-    public string Time = "", Who = "", Text = "", Picture, Day;
-    public int Minutes;
-    public bool IsPicture { get { return Picture != null; } }
-    public bool IsEvent { get { return Picture == null && Who.Length == 0; } }
-}
-
-public static class Transcript
-{
-    static readonly Regex Said = new Regex(@"^\*\*(\d{1,2}):(\d{2}) ([^:*]+):\*\*\s?(.*)$");
-    static readonly Regex Did = new Regex(@"^\*(\d{1,2}):(\d{2}) (.+?)\*?$");
-    static readonly Regex Shot = new Regex(@"^screenshot-(\d{8})-(\d{2})(\d{2})(\d{2})");
-
-    // "**14:39 Capri:** text" and "*21:31 She glanced at your screen*"; titles and notes give null.
-    public static Entry Parse(string line)
-    {
-        Match m = Said.Match(line ?? "");
-        if (m.Success)
-        {
-            string who = m.Groups[3].Value.Trim();
-            return Make(m.Groups[1].Value, m.Groups[2].Value, who == "Capri" ? LogWindow.HerName : who, m.Groups[4].Value);
-        }
-        m = Did.Match(line ?? "");
-        return m.Success ? Make(m.Groups[1].Value, m.Groups[2].Value, "", m.Groups[3].Value) : null;
-    }
-
-    static Entry Make(string hour, string minute, string who, string text)
-    {
-        int h = int.Parse(hour, CultureInfo.InvariantCulture), mi = int.Parse(minute, CultureInfo.InvariantCulture);
-        return new Entry { Time = h.ToString("00") + ":" + minute, Minutes = h * 60 + mi, Who = who, Text = text };
-    }
-
-    // A day's lines with that day's pasted screenshots slotted in at the moment they were pasted,
-    // so each one lands just before the message it went with.
-    public static List<Entry> Day(string text, string day, string pictures)
-    {
-        List<Entry> entries = new List<Entry>();
-        foreach (string raw in (text ?? "").Replace("\r", "").Split('\n'))
-        {
-            Entry e = Parse(raw);
-            if (e != null) { e.Day = day; entries.Add(e); }
-        }
-        foreach (Entry p in Pictures(day, pictures))
-        {
-            int at = entries.Count;
-            for (int i = 0; i < entries.Count; i++) if (entries[i].Minutes > p.Minutes) { at = i; break; }
-            entries.Insert(at, p);
-        }
-        return entries;
-    }
-
-    static List<Entry> Pictures(string day, string folder)
-    {
-        List<Entry> found = new List<Entry>();
-        string stamp = day.Replace("-", "");
-        try
-        {
-            if (!Directory.Exists(folder)) return found;
-            foreach (string file in Directory.GetFiles(folder, "screenshot-" + stamp + "-*.png"))
-            {
-                Match m = Shot.Match(Path.GetFileName(file));
-                if (!m.Success) continue;
-                int h = int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture), mi = int.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture);
-                found.Add(new Entry { Time = m.Groups[2].Value + ":" + m.Groups[3].Value, Minutes = h * 60 + mi, Who = "You", Picture = file, Day = day });
-            }
-        }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
-        found.Sort(delegate(Entry a, Entry b) { return string.CompareOrdinal(a.Picture, b.Picture); });
-        return found;
-    }
-}
-
-public sealed class LogWindow : Form
-{
-    internal static readonly Color Ground = Color.FromArgb(14, 14, 10), Side = Color.FromArgb(20, 20, 14), Raised = Color.FromArgb(30, 30, 20),
-        Field = Color.FromArgb(38, 37, 26), Hover = Color.FromArgb(22, 22, 15),
-        Ink = Color.FromArgb(236, 236, 241), Faint = Color.FromArgb(132, 130, 112), Her = Color.FromArgb(252, 239, 3),
-        You = Color.FromArgb(0, 230, 240), Link = Color.FromArgb(0, 200, 255), Code = Color.FromArgb(28, 28, 22);
-    internal static string HerName = "Capri";
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wide, string text);
-
-    readonly Func<string[]> days;
-    readonly Func<DateTime, string> transcript;
-    readonly Action<string> send;
-    readonly Func<string[], string> attach;      // hands pictures to her; returns their names, or null
-    readonly Action<string> sendPictures;        // pictures with no words: like dropping files on her
-    readonly Func<bool> busy;
-    readonly string pictures, transcripts;
-    readonly Action<string> log;
-    readonly ListBox dayList = new ListBox();
-    readonly Feed feed;
-    readonly TextBox search = new TextBox();
-    readonly TextBox message = new TextBox();
-    readonly Label placeholder = new Label();
-    readonly Panel bar = new Panel();
-    readonly Panel tray = new Panel();           // pictures waiting to go with the next message
-    readonly List<string> pending = new List<string>();
-    readonly List<Image> pendingThumbs = new List<Image>();
-    readonly Label typing = new Label();
-    readonly Label status = new Label();
-    readonly Timer live = new Timer();
-    string shownKey = "";
-    DateTime quickUntil = DateTime.MinValue;
-    const int Longest = 2000, MostPictures = 5, TrayThumb = 56;
-    static readonly string[] PictureTypes = { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff" };
-
-    public LogWindow(Func<string[]> days, Func<DateTime, string> transcript, Action<string> send,
-                     Func<string[], string> attach, Action<string> sendPictures, Func<bool> busy,
-                     Image avatar, string pictures, string transcripts, Action<string> log)
-    {
-        this.days = days;
-        this.transcript = transcript;
-        this.send = send;
-        this.attach = attach;
-        this.sendPictures = sendPictures;
-        this.busy = busy;
-        this.pictures = pictures;
-        this.transcripts = transcripts;
-        this.log = log;
-        feed = new Feed(avatar);
-        Text = "DM Capri!";
-        StartPosition = FormStartPosition.CenterScreen;
-        Size = new Size(960, 720);
-        MinimumSize = new Size(600, 420);
-        BackColor = Ground;
-        ForeColor = Ink;
-        Font = new Font("Segoe UI", 10f);
-
-        Panel top = new Panel { Dock = DockStyle.Top, Height = 52, BackColor = Side, Padding = new Padding(16, 12, 16, 10) };
-        Label title = new Label { Text = "DM CAPRI!", AutoSize = false, Width = 150, Dock = DockStyle.Left, ForeColor = Her, Font = new Font("Segoe UI Semibold", 12f), TextAlign = ContentAlignment.MiddleLeft };
-        Panel searchBox = new Panel { Dock = DockStyle.Fill, BackColor = Raised, Padding = new Padding(10, 6, 10, 4) };
-        search.Dock = DockStyle.Fill;
-        search.BackColor = Raised;
-        search.ForeColor = Ink;
-        search.BorderStyle = BorderStyle.None;
-        search.HandleCreated += delegate { SendMessage(search.Handle, 0x1501, new IntPtr(1), "Search every day"); };
-        search.TextChanged += delegate { ShowNow(true); };
-        searchBox.Controls.Add(search);
-        Button folder = new Button { Text = "Open folder", Dock = DockStyle.Right, Width = 118, FlatStyle = FlatStyle.Flat, ForeColor = Her, BackColor = Side, Cursor = Cursors.Default };
-        folder.FlatAppearance.BorderColor = Her;
-        folder.FlatAppearance.MouseOverBackColor = Raised;
-        folder.Click += delegate { Open(transcripts); };
-        Panel gap = new Panel { Dock = DockStyle.Right, Width = 12, BackColor = Side };
-        top.Controls.AddRange(new Control[] { searchBox, gap, folder, title });
-
-        dayList.Dock = DockStyle.Left;
-        dayList.Width = 190;
-        dayList.BackColor = Side;
-        dayList.ForeColor = Ink;
-        dayList.BorderStyle = BorderStyle.None;
-        dayList.IntegralHeight = false;
-        dayList.DrawMode = DrawMode.OwnerDrawFixed;
-        dayList.ItemHeight = 44;
-        dayList.DrawItem += DrawDay;
-        dayList.SelectedIndexChanged += delegate { if (search.Text.Length > 0) search.Text = ""; else ShowNow(true); };
-
-        // The chat bar: Enter sends, as if you'd typed it in her Type box; Shift+Enter
-        // starts a new line; Ctrl+V with a picture (or picture files) attaches it.
-        bar.Dock = DockStyle.Bottom;
-        bar.BackColor = Ground;
-        bar.Padding = new Padding(16, 4, 16, 14);
-        Panel field = new Panel { Dock = DockStyle.Fill, BackColor = Field, Padding = new Padding(14, 11, 14, 8) };
-        field.Paint += delegate(object s, PaintEventArgs e)
-        {
-            using (Pen edge = new Pen(message.Focused ? Color.FromArgb(120, Her) : Color.FromArgb(50, 50, 36)))
-                e.Graphics.DrawRectangle(edge, 0, 0, field.Width - 1, field.Height - 1);
-        };
-        message.Dock = DockStyle.Fill;
-        message.Multiline = true;
-        message.AcceptsReturn = true;
-        message.WordWrap = true;
-        message.BackColor = Field;
-        message.ForeColor = Ink;
-        message.BorderStyle = BorderStyle.None;
-        message.Font = new Font("Segoe UI", 10.5f);
-        message.GotFocus += delegate { field.Invalidate(); };
-        message.LostFocus += delegate { field.Invalidate(); };
-        message.TextChanged += delegate { Grow(); };
-        message.KeyDown += Typed;
-        // A multi-line box can't show Windows' grey hint, so a label stands in while it's empty.
-        placeholder.Text = "Message " + HerName + "   ·   Shift+Enter for a new line   ·   Ctrl+V to add a picture";
-        placeholder.AutoSize = false;
-        placeholder.Dock = DockStyle.Fill;
-        placeholder.ForeColor = Faint;
-        placeholder.BackColor = Field;
-        placeholder.Font = message.Font;
-        placeholder.Click += delegate { message.Focus(); };
-        message.TextChanged += delegate { placeholder.Visible = message.TextLength == 0; };
-        field.Controls.Add(placeholder);
-        field.Controls.Add(message);
-        placeholder.BringToFront();
-        bar.Controls.Add(field);
-
-        tray.Dock = DockStyle.Bottom;
-        tray.Height = TrayThumb + 16;
-        tray.BackColor = Ground;
-        tray.Visible = false;
-        tray.Paint += PaintTray;
-        tray.MouseClick += TrayClicked;
-        Grow();
-
-        typing.Dock = DockStyle.Bottom;
-        typing.Height = 20;
-        typing.ForeColor = Faint;
-        typing.BackColor = Ground;
-        typing.Padding = new Padding(18, 2, 0, 0);
-        typing.Font = new Font("Segoe UI", 8.5f, FontStyle.Italic);
-
-        status.Dock = DockStyle.Bottom;
-        status.Height = 24;
-        status.ForeColor = Faint;
-        status.BackColor = Side;
-        status.Padding = new Padding(14, 4, 0, 0);
-        status.Font = new Font("Segoe UI", 9f);
-
-        Controls.Add(feed);
-        Controls.Add(typing);
-        Controls.Add(tray);
-        Controls.Add(bar);
-        Controls.Add(dayList);
-        Controls.Add(top);
-        Controls.Add(status);
-
-        LoadDays();
-        // New lines and pictures show up while you chat; quicker for a minute after you send.
-        live.Interval = 1000;
-        live.Tick += delegate
-        {
-            bool thinking = false;
-            try { thinking = busy(); } catch (Exception) { }
-            typing.Text = thinking ? HerName + " is typing…" : "";
-            if (search.Text.Trim().Length > 0) return;
-            if (DateTime.Now < quickUntil || DateTime.Now.Second % 3 == 0) ShowNow(false);
-        };
-        live.Start();
-    }
-
-    void Typed(object sender, KeyEventArgs e)
-    {
-        if (e.KeyCode == Keys.Enter && !e.Shift) { e.SuppressKeyPress = true; Send(); return; }
-        if (e.KeyCode == Keys.Escape && pending.Count > 0) { e.SuppressKeyPress = true; ClearPending(); return; }
-        if (e.KeyCode == Keys.V && e.Control && !e.Alt && !e.Shift)
-        {
-            try
-            {
-                int before = pending.Count;
-                if (Clipboard.ContainsImage())
-                {
-                    using (Image picture = Clipboard.GetImage())
-                        if (picture != null) AddPending(Save(picture));
-                }
-                else if (Clipboard.ContainsFileDropList())
-                {
-                    foreach (string file in Clipboard.GetFileDropList())
-                    {
-                        if (!IsPicture(file)) continue;
-                        using (MemoryStream bytes = new MemoryStream(File.ReadAllBytes(file)))
-                        using (Image picture = Image.FromStream(bytes))
-                            AddPending(Save(picture));
-                    }
-                }
-                if (pending.Count > before) e.SuppressKeyPress = true;   // otherwise it's text: paste as usual
-            }
-            catch (Exception ex) { log("couldn't paste that picture: " + ex.Message); }
-        }
-    }
-
-    // Up to six lines tall, then it scrolls.
-    void Grow()
-    {
-        int lines = 1;
-        if (message.IsHandleCreated && message.TextLength > 0) lines = message.GetLineFromCharIndex(message.TextLength) + 1;
-        lines = Math.Max(1, Math.Min(6, lines));
-        int height = 52 + (lines - 1) * (message.Font.Height) + 14;
-        if (bar.Height != height) bar.Height = height;
-        message.ScrollBars = lines >= 6 ? ScrollBars.Vertical : ScrollBars.None;
-    }
-
-    static bool IsPicture(string file)
-    {
-        try
-        {
-            return Array.IndexOf(PictureTypes, Path.GetExtension(file).ToLowerInvariant()) >= 0
-                && File.Exists(file) && new FileInfo(file).Length <= 50L * 1024 * 1024;
-        }
-        catch (Exception) { return false; }
-    }
-
-    // Waiting pictures sit in a temp folder; sending moves them to where the log shows them.
-    static readonly string Waiting = Path.Combine(Path.GetTempPath(), "capri-chat-bar");
-
-    string Save(Image picture)
-    {
-        Directory.CreateDirectory(Waiting);
-        string pictures = Waiting;
-        double scale = Math.Min(1.0, (double)Longest / Math.Max(picture.Width, picture.Height));
-        int w = Math.Max(1, (int)Math.Round(picture.Width * scale)), h = Math.Max(1, (int)Math.Round(picture.Height * scale));
-        string path = Path.Combine(pictures, "screenshot-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture) + ".png");
-        using (Bitmap shot = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format24bppRgb))
-        using (Graphics g = Graphics.FromImage(shot))
-        {
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.DrawImage(picture, 0, 0, w, h);
-            shot.Save(path, System.Drawing.Imaging.ImageFormat.Png);
-        }
-        return path;
-    }
-
-    void AddPending(string path)
-    {
-        if (pending.Count >= MostPictures) { try { File.Delete(path); } catch (Exception) { } return; }
-        pending.Add(path);
-        try
-        {
-            using (MemoryStream bytes = new MemoryStream(File.ReadAllBytes(path)))
-            using (Image full = Image.FromStream(bytes))
-            {
-                double scale = (double)TrayThumb / Math.Max(full.Width, full.Height);
-                Bitmap small = new Bitmap(Math.Max(1, (int)(full.Width * scale)), Math.Max(1, (int)(full.Height * scale)));
-                using (Graphics g = Graphics.FromImage(small)) { g.InterpolationMode = InterpolationMode.HighQualityBicubic; g.DrawImage(full, 0, 0, small.Width, small.Height); }
-                pendingThumbs.Add(small);
-            }
-        }
-        catch (Exception) { pendingThumbs.Add(null); }
-        tray.Visible = true;
-        tray.Invalidate();
-    }
-
-    // Removing a picture before sending also deletes its copy, so it never shows in the log.
-    void RemovePending(int i, bool deleteFile)
-    {
-        if (deleteFile) try { File.Delete(pending[i]); } catch (Exception) { }
-        if (pendingThumbs[i] != null) pendingThumbs[i].Dispose();
-        pending.RemoveAt(i);
-        pendingThumbs.RemoveAt(i);
-        tray.Visible = pending.Count > 0;
-        tray.Invalidate();
-    }
-
-    void ClearPending() { while (pending.Count > 0) RemovePending(0, true); }
-
-    Rectangle TraySlot(int i) { return new Rectangle(18 + i * (TrayThumb + 12), 8, TrayThumb, TrayThumb); }
-    static Rectangle CloseBox(Rectangle slot) { return new Rectangle(slot.Right - 18, slot.Y - 4, 22, 22); }
-
-    void PaintTray(object sender, PaintEventArgs e)
-    {
-        Graphics g = e.Graphics;
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        for (int i = 0; i < pending.Count; i++)
-        {
-            Rectangle slot = TraySlot(i);
-            using (Brush back = new SolidBrush(Raised)) g.FillRectangle(back, slot);
-            Image t = pendingThumbs[i];
-            if (t != null) g.DrawImage(t, slot.X + (slot.Width - t.Width) / 2, slot.Y + (slot.Height - t.Height) / 2, t.Width, t.Height);
-            using (Pen edge = new Pen(Color.FromArgb(120, You))) g.DrawRectangle(edge, slot);
-            Rectangle x = CloseBox(slot);
-            using (Brush dot = new SolidBrush(Color.FromArgb(220, 60, 60))) g.FillEllipse(dot, x);
-            TextRenderer.DrawText(g, "×", new Font("Segoe UI Semibold", 10f), x, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-        }
-        string note = pending.Count == 1 ? "1 picture goes with your next message  ·  Esc removes it" : pending.Count + " pictures go with your next message  ·  Esc removes them";
-        TextRenderer.DrawText(g, note, new Font("Segoe UI", 8.5f), new Point(TraySlot(pending.Count).X + 4, 8 + TrayThumb / 2 - 8), Faint);
-    }
-
-    void TrayClicked(object sender, MouseEventArgs e)
-    {
-        for (int i = 0; i < pending.Count; i++)
-            if (CloseBox(TraySlot(i)).Contains(e.Location) || TraySlot(i).Contains(e.Location)) { RemovePending(i, true); return; }
-    }
-
-    void Send()
-    {
-        string text = message.Text.Trim();
-        if (text.Length == 0 && pending.Count == 0) return;
-        try
-        {
-            if (pending.Count > 0)
-            {
-                // Into the log's picture folder, so the chat shows them once sent.
-                Directory.CreateDirectory(pictures);
-                for (int i = 0; i < pending.Count; i++)
-                {
-                    string moved = Path.Combine(pictures, Path.GetFileName(pending[i]));
-                    if (!File.Exists(moved)) File.Move(pending[i], moved);
-                    pending[i] = moved;
-                }
-                // The pictures are handed to her first; the next thing she hears takes them along.
-                string names = attach(pending.ToArray());
-                if (string.IsNullOrEmpty(names)) { log("she couldn't take those pictures"); return; }
-                if (text.Length > 0) send(text);
-                else sendPictures(names);
-                while (pending.Count > 0) RemovePending(0, false);   // keep the files: the log shows them
-            }
-            else send(text);
-        }
-        catch (Exception e) { log("couldn't send: " + e.Message); return; }
-        message.Clear();
-        // Show today, where the message lands, and keep checking quickly for her answer.
-        if (search.Text.Length > 0) search.Text = "";
-        string today = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        int at = dayList.Items.IndexOf(today);
-        if (at >= 0 && dayList.SelectedIndex != at) dayList.SelectedIndex = at;
-        quickUntil = DateTime.Now.AddSeconds(90);
-        feed.JumpToEnd();
-    }
-
-    void DrawDay(object sender, DrawItemEventArgs e)
-    {
-        if (e.Index < 0) return;
-        string day = (string)dayList.Items[e.Index];
-        bool chosen = (e.State & DrawItemState.Selected) != 0;
-        using (Brush back = new SolidBrush(chosen ? Raised : Side)) e.Graphics.FillRectangle(back, e.Bounds);
-        if (chosen) using (Brush bar = new SolidBrush(Her)) e.Graphics.FillRectangle(bar, e.Bounds.X, e.Bounds.Y + 8, 3, e.Bounds.Height - 16);
-        Rectangle words = new Rectangle(e.Bounds.X + 16, e.Bounds.Y + 4, e.Bounds.Width - 20, 20);
-        TextRenderer.DrawText(e.Graphics, Friendly(day), new Font("Segoe UI Semibold", 10f), words, chosen ? Her : Ink, TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
-        words.Y += 19;
-        TextRenderer.DrawText(e.Graphics, day, new Font("Segoe UI", 8.5f), words, Faint, TextFormatFlags.Left);
-    }
-
-    internal static string Friendly(string day)
-    {
-        DateTime when;
-        if (!DateTime.TryParseExact(day, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out when)) return day;
-        if (when.Date == DateTime.Today) return "Today";
-        if (when.Date == DateTime.Today.AddDays(-1)) return "Yesterday";
-        return when.ToString(when.Year == DateTime.Today.Year ? "ddd d MMM" : "ddd d MMM yyyy", CultureInfo.CurrentCulture);
-    }
-
-    void LoadDays()
-    {
-        string keep = dayList.SelectedItem as string;
-        List<string> all = new List<string>(days() ?? new string[0]);
-        all.Sort(StringComparer.Ordinal);
-        all.Reverse();
-        dayList.BeginUpdate();
-        dayList.Items.Clear();
-        foreach (string d in all) dayList.Items.Add(d);
-        dayList.EndUpdate();
-        if (dayList.Items.Count > 0) dayList.SelectedIndex = Math.Max(0, keep == null ? 0 : dayList.Items.IndexOf(keep));
-        else feed.Show(new List<Entry> { new Entry { Text = "No chats saved yet. Say hi below and they'll show up here." } }, true);
-    }
-
-    string Read(string day)
-    {
-        DateTime when;
-        if (!DateTime.TryParseExact(day, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out when)) return "";
-        try { return transcript(when) ?? ""; }
-        catch (Exception e) { log(e.Message); return ""; }
-    }
-
-    void ShowNow(bool force)
-    {
-        string today = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        if (!dayList.Items.Contains(today) && Array.IndexOf(days() ?? new string[0], today) >= 0) { LoadDays(); return; }
-        string query = search.Text.Trim();
-        List<Entry> entries;
-        string label;
-        if (query.Length > 0)
-        {
-            entries = new List<Entry>();
-            foreach (object item in dayList.Items)
-                foreach (Entry e in Transcript.Day(Read((string)item), (string)item, pictures))
-                    if (!e.IsPicture && e.Text.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0) entries.Add(e);
-            label = entries.Count + " messages match \"" + query + "\"";
-            if (entries.Count == 0) entries.Add(new Entry { Text = "Nothing matches \"" + query + "\"." });
-        }
-        else
-        {
-            string day = dayList.SelectedItem as string;
-            if (day == null) return;
-            entries = Transcript.Day(Read(day), day, pictures);
-            int said = 0, shots = 0;
-            foreach (Entry e in entries) { if (e.IsPicture) shots++; else if (!e.IsEvent) said++; }
-            label = Friendly(day) + "  ·  " + said + " messages" + (shots > 0 ? "  ·  " + shots + (shots == 1 ? " picture" : " pictures") : "");
-            if (entries.Count == 0) entries.Add(new Entry { Text = "Nothing said this day." });
-        }
-        string key = query + "|" + (dayList.SelectedItem as string) + "|" + Signature(entries);
-        if (!force && key == shownKey) return;
-        bool newDay = force || !shownKey.StartsWith(query + "|" + (dayList.SelectedItem as string) + "|", StringComparison.Ordinal);
-        shownKey = key;
-        feed.Show(entries, newDay, query.Length > 0);
-        status.Text = label;
-    }
-
-    static string Signature(List<Entry> entries)
-    {
-        return entries.Count + ":" + (entries.Count == 0 ? "" : entries[entries.Count - 1].Time + entries[entries.Count - 1].Text + entries[entries.Count - 1].Picture);
-    }
-
-    internal static void Open(string path)
-    {
-        try { if (File.Exists(path) || Directory.Exists(path)) Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
-        catch (Exception) { }
-    }
-
-    // Only web links, opened in your browser.
-    internal static void OpenLink(string url)
-    {
-        if (url.StartsWith("www.", StringComparison.OrdinalIgnoreCase)) url = "https://" + url;
-        Uri uri;
-        if (!Uri.TryCreate(url, UriKind.Absolute, out uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)) return;
-        try { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); }
-        catch (Exception) { }
-    }
-
-    protected override void OnShown(EventArgs e)
-    {
-        base.OnShown(e);
-        BeginInvoke((MethodInvoker)delegate { feed.JumpToEnd(); message.Focus(); Grow(); });
-    }
-
-    protected override void OnFormClosed(FormClosedEventArgs e)
-    {
-        ClearPending();      // unsent pictures don't linger
-        live.Stop();
-        live.Dispose();
-        feed.Release();
-        base.OnFormClosed(e);
-    }
-}
-
-// One run of text with its look: plain, bold, italic, code, or a link.
-sealed class Piece
-{
-    public string Text, Link;
-    public Font Font;
-    public Color Color;
-    public bool Code;
-    public Rectangle Box;       // where it's drawn, relative to the row
-}
-
-// One row in the feed: a message with its header, a follow-on message, a picture or an event.
-sealed class Row
-{
-    public Entry E;
-    public bool Head;
-    public int Y, Height;
-    public Rectangle Picture;   // relative to the row
-    public List<Piece> Pieces = new List<Piece>();
-}
-
-// The conversation, drawn by hand Discord-style: avatar, name and time, then
-// the messages, with back-to-back ones from the same person grouped under one header.
-public sealed class Feed : Panel
-{
-    const int Pad = 16, Avatar = 40, Indent = Pad + Avatar + 16, GroupMinutes = 5;
-    internal static int MaxPicture = 300;           // from the mod's Options
-    internal static float TextSize = 10.5f;
-    static readonly Regex Marks = new Regex(@"(?<link>(?:https?://|www\.)[^\s<>""]+)|\*\*(?<bold>[^*]+)\*\*|(?<![*\w])\*(?<italic>[^*\s][^*]*)\*(?![*\w])|`(?<code>[^`]+)`");
-    readonly List<Entry> entries = new List<Entry>();
-    readonly List<Row> rows = new List<Row>();
-    readonly Dictionary<string, Image> thumbs = new Dictionary<string, Image>();
-    readonly Font text, bold, italic, code, small, name;
-    readonly Image herFace;
-    bool searching, wantEnd;
-    int contentHeight, hovered = -1, laidWidth;
-    string lastRight;
-
-    public Feed(Image avatar)
-    {
-        herFace = avatar;
-        text = new Font("Segoe UI", TextSize);
-        bold = new Font("Segoe UI Semibold", TextSize);
-        italic = new Font("Segoe UI", TextSize, FontStyle.Italic);
-        code = new Font("Consolas", TextSize - 0.5f);
-        small = new Font("Segoe UI", 8.5f);
-        name = new Font("Segoe UI Semibold", 10.5f);
-        Dock = DockStyle.Fill;
-        BackColor = LogWindow.Ground;
-        DoubleBuffered = true;
-        AutoScroll = true;
-        SetStyle(ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
-        MouseClick += Clicked;
-        MouseMove += Moved;
-        MouseLeave += delegate { if (hovered >= 0) { hovered = -1; Invalidate(); } };
-        ContextMenuStrip = new ContextMenuStrip();
-        ContextMenuStrip.Items.Add("Copy message", null, delegate { if (lastRight != null) Clipboard.SetText(lastRight); });
-        MouseDown += delegate(object s, MouseEventArgs e) { if (e.Button == MouseButtons.Right) { int i = RowAt(e.Location); lastRight = i >= 0 && !rows[i].E.IsPicture ? rows[i].E.Text : null; } };
-    }
-
-    public void Show(List<Entry> list, bool jumpToEnd, bool search = false)
-    {
-        bool atEnd = AtEnd;
-        entries.Clear();
-        entries.AddRange(list);
-        searching = search;
-        wantEnd = jumpToEnd || atEnd;
-        Arrange();
-        GoToEnd();
-        Invalidate();
-    }
-
-    bool AtEnd { get { return -AutoScrollPosition.Y + ClientSize.Height >= contentHeight - 40; } }
-
-    public void JumpToEnd() { wantEnd = true; GoToEnd(); Invalidate(); }
-
-    void GoToEnd()
-    {
-        if (!wantEnd || !IsHandleCreated || ClientSize.Height <= 0) return;
-        int target = Math.Max(0, contentHeight - ClientSize.Height);
-        AutoScrollPosition = new Point(0, target);
-        wantEnd = -AutoScrollPosition.Y < target - 2;
-    }
-
-    protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); GoToEnd(); }
-    protected override void OnVisibleChanged(EventArgs e) { base.OnVisibleChanged(e); if (Visible) { Arrange(); GoToEnd(); } }
-
-    public void Release()
-    {
-        foreach (Image i in thumbs.Values) if (i != null) i.Dispose();
-        thumbs.Clear();
-    }
-
-    int TextWide { get { return Math.Max(160, ClientSize.Width - Indent - Pad - 10); } }
-
-    protected override void OnResize(EventArgs e)
-    {
-        bool atEnd = AtEnd;
-        base.OnResize(e);
-        if (ClientSize.Width != laidWidth) Arrange();
-        if (atEnd) wantEnd = true;
-        GoToEnd();
-    }
-
-    // Same person, same day, within a few minutes, and nothing in between: no new header.
-    static bool Follows(Entry prev, Entry e)
-    {
-        return prev != null && !prev.IsEvent && !e.IsEvent && prev.Who == e.Who && prev.Day == e.Day
-            && e.Minutes - prev.Minutes >= 0 && e.Minutes - prev.Minutes <= GroupMinutes;
-    }
-
-    void Arrange()
-    {
-        rows.Clear();
-        laidWidth = ClientSize.Width;
-        int y = Pad;
-        string lastDay = null;
-        Entry prev = null;
-        using (Graphics g = CreateGraphics())
-            foreach (Entry e in entries)
-            {
-                if (searching && e.Day != lastDay && e.Day != null) { y += 30; lastDay = e.Day; prev = null; }
-                Row r = new Row { E = e, Head = !Follows(prev, e) };
-                int top = r.Head ? (prev == null ? 4 : 16) : 2;
-                int body = r.Head && !e.IsEvent ? 22 : 0;
-                if (e.IsEvent)
-                {
-                    Size s = TextRenderer.MeasureText(g, Line(e), small, new Size(ClientSize.Width - 2 * Pad - 80, int.MaxValue), TextFormatFlags.WordBreak);
-                    r.Height = top + s.Height + 6;
-                }
-                else if (e.IsPicture)
-                {
-                    Image t = Thumb(e.Picture);
-                    Size s = t == null ? new Size(220, 40) : t.Size;
-                    r.Picture = new Rectangle(Indent, top + body, s.Width, s.Height);
-                    r.Height = top + body + s.Height + 4;
-                }
-                else
-                {
-                    int h = Wrap(g, e.Text, r.Pieces, Indent, top + body, TextWide);
-                    r.Height = top + body + h + 2;
-                }
-                r.Y = y;
-                rows.Add(r);
-                y += r.Height;
-                prev = e;
-            }
-        contentHeight = y + Pad;
-        AutoScrollMinSize = new Size(0, contentHeight);
-    }
-
-    static string Line(Entry e) { return (e.Time.Length > 0 ? e.Time + "  ·  " : "") + e.Text; }
-
-    // Splits the message into styled runs (links, **bold**, *italic*, `code`),
-    // then lays them out word by word, wrapping at the width. Returns the height.
-    int Wrap(Graphics g, string message, List<Piece> into, int left, int top, int width)
-    {
-        List<Piece> runs = new List<Piece>();
-        int at = 0;
-        foreach (Match m in Marks.Matches(message ?? ""))
-        {
-            if (m.Index > at) runs.Add(new Piece { Text = message.Substring(at, m.Index - at), Font = text, Color = LogWindow.Ink });
-            if (m.Groups["link"].Success)
-            {
-                string url = m.Groups["link"].Value.TrimEnd('.', ',', '!', '?', ';', ':', ')', '\'', '"');
-                runs.Add(new Piece { Text = url, Font = text, Color = LogWindow.Link, Link = url });
-                if (url.Length < m.Length) runs.Add(new Piece { Text = m.Value.Substring(url.Length), Font = text, Color = LogWindow.Ink });
-            }
-            else if (m.Groups["bold"].Success) runs.Add(new Piece { Text = m.Groups["bold"].Value, Font = bold, Color = LogWindow.Ink });
-            else if (m.Groups["italic"].Success) runs.Add(new Piece { Text = m.Groups["italic"].Value, Font = italic, Color = LogWindow.Ink });
-            else runs.Add(new Piece { Text = m.Groups["code"].Value, Font = code, Color = LogWindow.Ink, Code = true });
-            at = m.Index + m.Length;
-        }
-        if (at < (message ?? "").Length) runs.Add(new Piece { Text = message.Substring(at), Font = text, Color = LogWindow.Ink });
-
-        const TextFormatFlags Exact = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
-        int lineHeight = text.Height + 2, x = 0, y = 0;
-        foreach (Piece run in runs)
-            foreach (string part in Regex.Split(run.Text.Replace("\r", ""), @"(\n|\s+)"))
-            {
-                if (part.Length == 0) continue;
-                if (part == "\n") { x = 0; y += lineHeight; continue; }
-                bool space = part.Trim().Length == 0;
-                if (space && x == 0) continue;                       // no spaces at the start of a line
-                string word = space ? " " : part;
-                int w = TextRenderer.MeasureText(g, word, run.Font, Size.Empty, Exact).Width;
-                if (!space && x + w > width && x > 0) { x = 0; y += lineHeight; }
-                // A word longer than the line (usually a link) is broken where it has to be.
-                while (!space && w > width)
-                {
-                    int fit = word.Length - 1;
-                    while (fit > 1 && TextRenderer.MeasureText(g, word.Substring(0, fit), run.Font, Size.Empty, Exact).Width > width - x) fit--;
-                    into.Add(Copy(run, word.Substring(0, fit), new Rectangle(left + x, top + y, width - x, lineHeight)));
-                    word = word.Substring(fit);
-                    x = 0;
-                    y += lineHeight;
-                    w = TextRenderer.MeasureText(g, word, run.Font, Size.Empty, Exact).Width;
-                }
-                if (space && x + w > width) continue;
-                into.Add(Copy(run, word, new Rectangle(left + x, top + y, w, lineHeight)));
-                x += w;
-            }
-        return y + lineHeight;
-    }
-
-    static Piece Copy(Piece run, string word, Rectangle box)
-    {
-        return new Piece { Text = word, Font = run.Font, Color = run.Color, Link = run.Link, Code = run.Code, Box = box };
-    }
-
-    Image Thumb(string path)
-    {
-        Image t;
-        if (thumbs.TryGetValue(path, out t)) return t;
-        try
-        {
-            // Read into memory and shrink, so the file isn't locked and the full picture isn't kept.
-            using (MemoryStream bytes = new MemoryStream(File.ReadAllBytes(path)))
-            using (Image full = Image.FromStream(bytes))
-            {
-                double scale = Math.Min(1.0, Math.Min((double)MaxPicture / full.Width, (double)MaxPicture / full.Height));
-                Bitmap shrunk = new Bitmap(Math.Max(1, (int)(full.Width * scale)), Math.Max(1, (int)(full.Height * scale)));
-                using (Graphics g = Graphics.FromImage(shrunk))
-                {
-                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                    g.DrawImage(full, 0, 0, shrunk.Width, shrunk.Height);
-                }
-                t = shrunk;
-            }
-        }
-        catch (Exception) { t = null; }
-        thumbs[path] = t;
-        return t;
-    }
-
-    protected override void OnPaint(PaintEventArgs pe)
-    {
-        base.OnPaint(pe);
-        Graphics g = pe.Graphics;
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        // Positions are moved by the scroll offset one by one: TextRenderer ignores
-        // Graphics transforms, so a TranslateTransform would leave the text behind.
-        int dy = AutoScrollPosition.Y;
-        Rectangle seen = ClientRectangle;
-        string lastDay = null;
-        for (int i = 0; i < rows.Count; i++)
-        {
-            Row r = rows[i];
-            Entry e = r.E;
-            int y = r.Y + dy;
-            if (searching && e.Day != lastDay && e.Day != null)
-            {
-                lastDay = e.Day;
-                DayDivider(g, LogWindow.Friendly(e.Day), y - 26);
-            }
-            if (y + r.Height < 0 || y > seen.Height) continue;
-            if (i == hovered && !e.IsEvent) using (Brush b = new SolidBrush(LogWindow.Hover)) g.FillRectangle(b, 0, y, ClientSize.Width, r.Height);
-            if (e.IsEvent)
-            {
-                TextRenderer.DrawText(g, Line(e), small, new Rectangle(Pad + 40, y + (r.Head ? 8 : 2), ClientSize.Width - 2 * Pad - 80, r.Height),
-                    LogWindow.Faint, TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak);
-                continue;
-            }
-            bool you = e.Who == "You";
-            int top = r.Head ? (i == 0 || (searching && rows[i - 1].E.Day != e.Day) ? 4 : 16) : 2;
-            if (r.Head)
-            {
-                DrawAvatar(g, new Rectangle(Pad, y + top, Avatar, Avatar), you);
-                Size nameSize = TextRenderer.MeasureText(g, e.Who, name, Size.Empty, TextFormatFlags.NoPadding);
-                TextRenderer.DrawText(g, e.Who, name, new Point(Indent, y + top), you ? LogWindow.You : LogWindow.Her, TextFormatFlags.NoPadding);
-                TextRenderer.DrawText(g, Stamp(e), small, new Point(Indent + nameSize.Width + 8, y + top + 3), LogWindow.Faint, TextFormatFlags.NoPadding);
-            }
-            else if (i == hovered)
-                TextRenderer.DrawText(g, e.Time, small, new Rectangle(0, y + 4, Indent - 8, 16), LogWindow.Faint, TextFormatFlags.Right | TextFormatFlags.NoPadding);
-            if (e.IsPicture)
-            {
-                Image t = Thumb(e.Picture);
-                Rectangle box = r.Picture;
-                box.Offset(0, y);
-                using (GraphicsPath path = Round(box, 8))
-                {
-                    if (t != null) { g.SetClip(path); g.DrawImage(t, box.X, box.Y, t.Width, t.Height); g.ResetClip(); }
-                    else
-                    {
-                        using (Brush back = new SolidBrush(LogWindow.Raised)) g.FillPath(back, path);
-                        TextRenderer.DrawText(g, "Picture no longer saved", small, box, LogWindow.Faint, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-                    }
-                }
-                continue;
-            }
-            foreach (Piece p in r.Pieces)
-            {
-                Rectangle box = p.Box;
-                box.Offset(0, y);
-                if (p.Code) using (Brush back = new SolidBrush(LogWindow.Code)) g.FillRectangle(back, box.X - 1, box.Y + 1, box.Width + 2, box.Height - 2);
-                TextRenderer.DrawText(g, p.Text, p.Font, box.Location, p.Color, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
-                if (p.Link != null) using (Pen under = new Pen(Color.FromArgb(140, p.Color))) g.DrawLine(under, box.X, box.Bottom - 3, box.Right, box.Bottom - 3);
-            }
-        }
-    }
-
-    static string Stamp(Entry e)
-    {
-        string day = e.Day == null ? "" : LogWindow.Friendly(e.Day);
-        if (day == "Today") return "Today at " + e.Time;
-        if (day == "Yesterday") return "Yesterday at " + e.Time;
-        return day.Length > 0 ? day + " " + e.Time : e.Time;
-    }
-
-    void DayDivider(Graphics g, string label, int y)
-    {
-        Size s = TextRenderer.MeasureText(g, label, small);
-        int mid = ClientSize.Width / 2;
-        using (Pen line = new Pen(Color.FromArgb(60, 60, 44)))
-        {
-            g.DrawLine(line, Pad, y + 10, mid - s.Width / 2 - 8, y + 10);
-            g.DrawLine(line, mid + s.Width / 2 + 8, y + 10, ClientSize.Width - Pad, y + 10);
-        }
-        TextRenderer.DrawText(g, label, small, new Point(mid - s.Width / 2, y + 3), LogWindow.Faint);
-    }
-
-    void DrawAvatar(Graphics g, Rectangle box, bool you)
-    {
-        using (GraphicsPath circle = new GraphicsPath())
-        {
-            circle.AddEllipse(box);
-            if (!you && herFace != null)
-            {
-                using (Brush back = new SolidBrush(LogWindow.Raised)) g.FillPath(back, circle);
-                g.SetClip(circle);
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                g.DrawImage(herFace, box);
-                g.ResetClip();
-                return;
-            }
-            using (Brush back = new SolidBrush(you ? Color.FromArgb(0, 70, 78) : Color.FromArgb(70, 66, 8))) g.FillPath(back, circle);
-            string letter = you ? "Y" : LogWindow.HerName.Substring(0, 1);
-            TextRenderer.DrawText(g, letter, name, box, you ? LogWindow.You : LogWindow.Her, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-        }
-    }
-
-    static GraphicsPath Round(Rectangle r, int radius)
-    {
-        GraphicsPath p = new GraphicsPath();
-        int d = radius * 2;
-        p.AddArc(r.X, r.Y, d, d, 180, 90);
-        p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-        p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-        p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-        p.CloseFigure();
-        return p;
-    }
-
-    int RowAt(Point p)
-    {
-        int y = p.Y - AutoScrollPosition.Y;
-        for (int i = 0; i < rows.Count; i++) if (y >= rows[i].Y && y < rows[i].Y + rows[i].Height) return i;
-        return -1;
-    }
-
-    // What's under the mouse: a link, a picture, or nothing.
-    string LinkAt(Point p, out string picture)
-    {
-        picture = null;
-        int i = RowAt(p);
-        if (i < 0) return null;
-        Row r = rows[i];
-        Point inRow = new Point(p.X, p.Y - AutoScrollPosition.Y - r.Y);
-        if (r.E.IsPicture && r.Picture.Contains(inRow)) { picture = r.E.Picture; return null; }
-        foreach (Piece piece in r.Pieces) if (piece.Link != null && piece.Box.Contains(inRow)) return piece.Link;
-        return null;
-    }
-
-    void Moved(object sender, MouseEventArgs e)
-    {
-        int i = RowAt(e.Location);
-        if (i != hovered) { hovered = i; Invalidate(); }
-        string picture;
-        string link = LinkAt(e.Location, out picture);
-        Cursor = link != null || picture != null ? Cursors.Hand : Cursors.Default;
-    }
-
-    void Clicked(object sender, MouseEventArgs e)
-    {
-        if (e.Button != MouseButtons.Left) return;
-        string picture;
-        string link = LinkAt(e.Location, out picture);
-        if (link != null) LogWindow.OpenLink(link);
-        else if (picture != null) LogWindow.Open(picture);
-    }
-
-    protected override void OnMouseWheel(MouseEventArgs e) { base.OnMouseWheel(e); Invalidate(); }
-    protected override void OnScroll(ScrollEventArgs se) { base.OnScroll(se); Invalidate(); }
-}
-
-// ---- Options page (Quaisar_THM's shared toolkit) -------------------------------
-// An Options page under Mainframe > Mods, in her colours. Every value lives in
-// this mod's own Store, so it survives restarts and updates. Toggles and
-// numbers apply as you change them; text applies on Enter or when you click away.
-sealed class Opts
-{
-    static readonly Color Back = Color.FromArgb(16, 15, 8), Ink = Color.FromArgb(236, 236, 241),
-        Dim = Color.FromArgb(150, 146, 120), Yellow = Color.FromArgb(252, 239, 3),
-        Cyan = Color.FromArgb(5, 202, 237), Field = Color.FromArgb(30, 29, 14), Edge = Color.FromArgb(90, 86, 10);
-    const int Wide = 690, Right = 470;
-
-    delegate int Row(Control page, int y);
-    readonly ICapriHost host;
-    readonly List<Row> rows = new List<Row>();
-
-    public Opts(ICapriHost host, string title)
-    {
-        this.host = host;
-        host.Ui.SetOptions(title, Build);
-    }
-
-    // Reading values, with sane fallbacks for anything missing or out of range.
-    public bool Flag(string key, bool def) { try { return host.Store.Flag(key, def); } catch (Exception) { return def; } }
-    public double Num(string key, double def, double min, double max)
-    {
-        double v;
-        try { v = host.Store.Number(key, def); } catch (Exception) { v = def; }
-        return double.IsNaN(v) ? def : Math.Max(min, Math.Min(max, v));
-    }
-    public string Str(string key, string def)
-    {
-        try { string v = host.Store.Get(key, def); return v ?? def; } catch (Exception) { return def; }
-    }
-
-    public void Section(string title)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            System.Windows.Forms.Label l = Text(title.ToUpperInvariant(), 18, y + (y > 14 ? 10 : 0), Wide);
-            l.ForeColor = Cyan;
-            l.Font = new Font("Segoe UI Semibold", 9.5f);
-            p.Controls.Add(l);
-            return l.Bottom + 8;
-        });
-    }
-
-    public void Note(string text)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            System.Windows.Forms.Label l = Text(text, 18, y, Wide);
-            l.ForeColor = Dim;
-            l.Font = new Font("Segoe UI", 8.5f);
-            l.Height = TextRenderer.MeasureText(text, l.Font, new Size(Wide, 0), TextFormatFlags.WordBreak).Height + 4;
-            p.Controls.Add(l);
-            return l.Bottom + 8;
-        });
-    }
-
-    public void Toggle(string label, string key, bool def, Action<bool> changed)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
-            Button off = Pill("OFF", Right + 50, y), on = Pill("ON", Right + 140, y);
-            MethodInvoker paint = delegate
-            {
-                bool v = Flag(key, def);
-                Lit(on, v);
-                Lit(off, !v);
-            };
-            off.Click += delegate { Save(key, false); paint(); Tell(changed, false); };
-            on.Click += delegate { Save(key, true); paint(); Tell(changed, true); };
-            paint();
-            p.Controls.Add(off);
-            p.Controls.Add(on);
-            return y + 42;
-        });
-    }
-
-    public void Number(string label, string key, double def, double min, double max, double step, int decimals, Action<double> changed)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
-            NumericUpDown box = new NumericUpDown
-            {
-                Left = Right + 50, Top = y + 2, Width = 170, DecimalPlaces = decimals,
-                Minimum = (decimal)min, Maximum = (decimal)max, Increment = (decimal)step,
-                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 10f), TextAlign = HorizontalAlignment.Center,
-            };
-            box.Value = (decimal)Num(key, def, min, max);
-            box.ValueChanged += delegate
-            {
-                double v = (double)box.Value;
-                try { host.Store.Set(key, v); } catch (Exception) { }
-                Tell(changed, v);
-            };
-            p.Controls.Add(box);
-            return y + 42;
-        });
-    }
-
-    public void Text(string label, string key, string def, Action<string> changed)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            p.Controls.Add(Text(label, 18, y, Wide));
-            TextBox box = new TextBox
-            {
-                Left = 18, Top = y + 24, Width = Wide, Text = Str(key, def),
-                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 10f),
-            };
-            string applied = box.Text;
-            MethodInvoker apply = delegate
-            {
-                if (box.Text == applied) return;
-                applied = box.Text;
-                try { host.Store.Set(key, applied); } catch (Exception) { }
-                Tell(changed, applied);
-            };
-            box.Leave += delegate { apply(); };
-            box.KeyDown += delegate(object s, KeyEventArgs e)
-            {
-                if (e.KeyCode != Keys.Enter) return;
-                e.SuppressKeyPress = true;
-                apply();
-            };
-            p.Controls.Add(box);
-            return box.Bottom + 12;
-        });
-    }
-
-    Control Build()
-    {
-        Panel page = new Panel { Width = Wide + 36, BackColor = Back, ForeColor = Ink, Font = new Font("Segoe UI", 9.5f) };
-        int y = 14;
-        foreach (Row r in rows) y = r(page, y);
-        page.Height = y + 10;
-        return page;
-    }
-
-    void Save(string key, bool v) { try { host.Store.Set(key, v); } catch (Exception) { } }
-
-    // A setting that fails to apply is logged, never thrown into her window.
-    void Tell<T>(Action<T> changed, T value)
-    {
-        if (changed == null) return;
-        try { changed(value); }
-        catch (Exception e) { try { host.Log("Options: " + e.Message); } catch (Exception) { } }
-    }
-
-    static System.Windows.Forms.Label Text(string text, int x, int y, int width)
-    {
-        return new System.Windows.Forms.Label { Text = text, Left = x, Top = y, Width = width, AutoSize = false, Height = 22, ForeColor = Ink, BackColor = Color.Transparent };
-    }
-
-    static Button Pill(string text, int x, int y)
-    {
-        Button b = new Button { Text = text, Left = x, Top = y, Width = 84, Height = 30, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Default, Font = new Font("Segoe UI Semibold", 9f) };
-        b.FlatAppearance.BorderColor = Edge;
-        return b;
-    }
-
-    static void Lit(Button b, bool lit)
-    {
-        b.BackColor = lit ? Yellow : Field;
-        b.ForeColor = lit ? Back : Ink;
-        b.FlatAppearance.BorderColor = lit ? Yellow : Edge;
-    }
-
-    // "a, b ,c" -> ["a","b","c"], blanks dropped.
-    public static List<string> Words(string list)
-    {
-        List<string> words = new List<string>();
-        foreach (string w in (list ?? "").Split(','))
-            if (w.Trim().Length > 0) words.Add(w.Trim());
-        return words;
-    }
-}
+// capri-mod: 1
+// id: dm-capri
+// name: DM Capri!
+// version: 1.0.0
+// author: Quaisar_THM
+// description: Your chats with her Discord-style, from her right-click menu: avatars, links, pictures, search, and a chat bar to message her with Shift+Enter and picture pasting.
+// requires: api 3
+// permissions: transcripts, chat
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Globalization;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Reflection;
+using System.Text.RegularExpressions;
+using System.Windows.Forms;
+using CapriDesktop;
+
+public class ChatLog : ICapriMod
+{
+    ICapriHost capri;
+    LogWindow window;
+    Opts opts;
+
+    public void Start(ICapriHost host)
+    {
+        capri = host;
+        if (opts == null)
+        {
+            opts = new Opts(host, "DM Capri!");
+            opts.Section("Chat button");
+            opts.Toggle("Show a chat button next to TYPE / TALK", "button", true, delegate(bool v) { if (v) StartButton(); else StopButton(); });
+            opts.Section("Look");
+            opts.Number("Screenshot size in the log (pixels)", "picture", 300, 100, 900, 20, 0, delegate(double v) { Feed.MaxPicture = (int)v; });
+            opts.Number("Text size", "text", 10.5, 8, 18, 0.5, 1, delegate(double v) { Feed.TextSize = (float)v; });
+            opts.Note("Changes show the next time you open DM Capri!.");
+        }
+        Feed.MaxPicture = (int)opts.Num("picture", 300, 100, 900);
+        Feed.TextSize = (float)opts.Num("text", 10.5, 8, 18);
+        try
+        {
+            host.Ui.AddMenuItem("DM Capri!", Open);
+            if (opts.Flag("button", true)) StartButton();
+            capri.Log("DM Capri!: open it from her right-click menu.");
+        }
+        catch (Exception e) { capri.Log("DM Capri! could not start: " + e.Message); }
+    }
+
+    public bool Heard(string words) { return false; }
+
+    public void Stop()
+    {
+        StopButton();
+        LogWindow w = window;
+        window = null;
+        if (w != null && !w.IsDisposed) w.BeginInvoke((MethodInvoker)delegate { w.Close(); });
+    }
+
+    const BindingFlags Inst = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+    const BindingFlags Stat = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
+
+    static Form Her()
+    {
+        try
+        {
+            foreach (Form f in Application.OpenForms)
+                if (f.GetType().FullName == "CapriDesktop.Companion" && f.IsHandleCreated) return f;
+        }
+        catch (InvalidOperationException) { }
+        return null;
+    }
+
+    // Queues pictures with her brain; the next thing she hears takes them along.
+    // Returns the names she gave them, or null.
+    static string Give(string[] paths)
+    {
+        Form her = Her();
+        if (her == null) return null;
+        object brain = her.GetType().GetField("brain", Inst).GetValue(her);
+        object files = brain.GetType().GetField("Attachments", Inst).GetValue(brain);
+        return (string)files.GetType().GetMethod("Give", Inst).Invoke(files, new object[] { paths });
+    }
+
+    // Pictures with no words: exactly what dropping files on her does.
+    // Hear(text, shown, prompt, ...) where everything after the third is optional.
+    static void Drop(string names)
+    {
+        Form her = Her();
+        if (her == null) return;
+        string dropped = (string)typeof(ICapriHost).Assembly.GetType("CapriDesktop.Files", true).GetField("Dropped", Stat).GetRawConstantValue();
+        foreach (MethodInfo m in her.GetType().GetMethods(Inst))
+        {
+            ParameterInfo[] ps = m.GetParameters();
+            if (m.Name != "Hear" || ps.Length < 3) continue;
+            bool fits = ps[0].ParameterType == typeof(string) && ps[1].ParameterType == typeof(string) && ps[2].ParameterType == typeof(string);
+            for (int i = 3; i < ps.Length && fits; i++) fits = ps[i].IsOptional;
+            if (!fits) continue;
+            object[] values = new object[ps.Length];
+            values[0] = dropped; values[1] = names; values[2] = "> file: ";
+            for (int i = 3; i < ps.Length; i++) values[i] = ps[i].DefaultValue;
+            her.BeginInvoke((MethodInvoker)delegate { m.Invoke(her, values); });
+            return;
+        }
+    }
+
+    // ---- The chat button beside her TYPE/TALK pill --------------------------
+    // Made from Capri's own parts: her floating Overlay window and TalkPill's
+    // button plate, so it looks like the buttons already there. It follows the
+    // pill as it moves, scales and hides.
+    const BindingFlags Any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+    const int Side = 40, Gap = 4;
+    Form herWindow, pill, button;
+    FieldInfo pillUntil, pillCentre, pillScale;
+    PropertyInfo chatting;
+    MethodInfo talkScale, present, plate;
+    Stopwatch clock;
+    Color cyan, ink;
+    System.Windows.Forms.Timer follow;
+    bool hover, drawnHover;
+    float drawnScale = -1;
+    Rectangle drawnAt;
+
+    void StartButton()
+    {
+        Form f = Her();
+        if (f == null) { capri.Timers.After(1, delegate { if (opts.Flag("button", true) && button == null) StartButton(); }); return; }
+        f.BeginInvoke((MethodInvoker)delegate
+        {
+            try
+            {
+                herWindow = f;
+                Assembly app = typeof(ICapriHost).Assembly;
+                Type pillType = app.GetType("CapriDesktop.TalkPill", true), look = app.GetType("CapriDesktop.Look", true), overlay = app.GetType("CapriDesktop.Overlay", true);
+                pill = (Form)Need(f.GetType().GetField("pill", Any), "pill").GetValue(f);
+                pillUntil = Need(f.GetType().GetField("pillUntil", Any), "pillUntil");
+                clock = (Stopwatch)Need(f.GetType().GetField("clock", Any), "clock").GetValue(f);
+                talkScale = Need(f.GetType().GetMethod("TalkScale", Any, null, Type.EmptyTypes, null), "TalkScale");
+                plate = Need(pillType.GetMethod("Plate", Any), "TalkPill.Plate");
+                pillCentre = Need(pillType.GetField("centre", Any), "TalkPill.centre");
+                pillScale = Need(pillType.GetField("scale", Any), "TalkPill.scale");
+                chatting = Need(pillType.GetProperty("Chatting", Any), "TalkPill.Chatting");
+                present = Need(overlay.GetMethod("Present", Any), "Overlay.Present");
+                cyan = (Color)Need(look.GetField("Cyan", Any), "Look.Cyan").GetValue(null);
+                ink = (Color)Need(look.GetField("Ink", Any), "Look.Ink").GetValue(null);
+                Cursor pointer = (Cursor)look.GetProperty("Pointer", Any).GetValue(null, null);
+                button = (Form)Activator.CreateInstance(overlay, Any, null, new object[] { "DM Capri!" }, null);
+                button.Cursor = pointer;
+                button.Owner = f;
+                button.MouseUp += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) Open(); };
+                follow = new System.Windows.Forms.Timer { Interval = 15 };
+                follow.Tick += delegate { Follow(); };
+                follow.Start();
+            }
+            catch (Exception e)
+            {
+                // A Capri update that renames one of these just means no button; the menu item still works.
+                capri.Log("DM Capri!: no chat button on this Capri (" + e.Message + ")");
+                StopButton();
+            }
+        });
+    }
+
+    void StopButton()
+    {
+        Form f = herWindow;
+        MethodInvoker stop = delegate
+        {
+            if (follow != null) { follow.Dispose(); follow = null; }
+            if (button != null) { button.Dispose(); button = null; }
+            drawnScale = -1;
+        };
+        try { if (f != null && f.IsHandleCreated && f.InvokeRequired) f.BeginInvoke(stop); else stop(); }
+        catch (Exception) { }
+    }
+
+    static T Need<T>(T found, string name) where T : class
+    {
+        if (found == null) throw new MissingMemberException(name + " is missing");
+        return found;
+    }
+
+    // Left of TYPE/TALK, and left of the mute button when that mod is on. Near the
+    // left edge of the screen it goes to the right instead, past the mic button.
+    Rectangle Spot(float sc, Point c, bool chat)
+    {
+        int slot = 1;
+        try { if (capri.Mods.IsRunning("mute-button")) slot = 2; } catch (Exception) { }
+        int side = (int)Math.Round(Side * sc), gap = (int)Math.Round(Gap * sc), wide = (int)Math.Round(100 * sc), pillLeft = c.X - wide / 2;
+        Rectangle at = new Rectangle(pillLeft - slot * (gap + side), c.Y, side, side);
+        if (at.Left < Screen.FromPoint(c).WorkingArea.Left)
+            at.X = pillLeft + wide + gap + (chat ? (int)Math.Round(40 * sc) + gap : 0) + (slot - 1) * (side + gap);
+        return at;
+    }
+
+    static Rectangle Body(float sc)
+    {
+        int side = (int)Math.Round(Side * Math.Max(sc, 0.1f)), margin = (int)Math.Round(3 * sc);
+        return new Rectangle(margin, margin, side - margin * 2, side - margin * 2);
+    }
+
+    void Follow()
+    {
+        if (button == null || button.IsDisposed || pill == null) return;
+        bool showing = pill.IsHandleCreated && pill.Visible && IsWindowVisible(pill.Handle);
+        if (!showing) { if (button.Visible) button.Hide(); hover = false; return; }
+        float sc = (float)pillScale.GetValue(pill);
+        if (sc < 0.5f || sc > 8) sc = (float)talkScale.Invoke(herWindow, null);
+        Rectangle want = Spot(sc, (Point)pillCentre.GetValue(pill), (bool)chatting.GetValue(pill, null));
+        Point cursor = Cursor.Position;
+        hover = button.Visible && want.Contains(cursor) && Body(sc).Contains(new Point(cursor.X - want.X, cursor.Y - want.Y));
+        // While you're on the button the pill stays up, like hovering the pill itself.
+        if (hover) pillUntil.SetValue(herWindow, Math.Max((double)pillUntil.GetValue(herWindow), clock.Elapsed.TotalSeconds + 1.5));
+        if (button.Visible && want == drawnAt && sc == drawnScale && hover == drawnHover) return;
+        drawnAt = want; drawnScale = sc; drawnHover = hover;
+        present.Invoke(button, new object[] { Render(sc, hover), want.Location });
+    }
+
+    Bitmap Render(float sc, bool lit)
+    {
+        int side = (int)Math.Round(Side * sc);
+        Bitmap image = new Bitmap(side, side, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        using (Graphics g = Graphics.FromImage(image))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            Rectangle body = Body(sc);
+            plate.Invoke(null, new object[] { g, body, sc, lit ? body : Rectangle.Empty, cyan, cyan });
+            DrawBubble(g, new PointF(body.Left + body.Width / 2f, body.Top + body.Height / 2f), sc, lit ? cyan : ink);
+        }
+        return image;
+    }
+
+    // A speech bubble with a tail and three dots.
+    static void DrawBubble(Graphics g, PointF c, float sc, Color colour)
+    {
+        float w = 17 * sc, h = 12 * sc, r = 3.5f * sc, x = c.X - w / 2, y = c.Y - h / 2 - 1.5f * sc;
+        using (GraphicsPath bubble = new GraphicsPath())
+        {
+            bubble.AddArc(x, y, 2 * r, 2 * r, 180, 90);
+            bubble.AddArc(x + w - 2 * r, y, 2 * r, 2 * r, 270, 90);
+            bubble.AddArc(x + w - 2 * r, y + h - 2 * r, 2 * r, 2 * r, 0, 90);
+            bubble.AddLine(x + w * 0.45f, y + h, x + w * 0.22f, y + h + 4.5f * sc);    // the tail
+            bubble.AddLine(x + w * 0.24f, y + h, x + w * 0.24f, y + h);
+            bubble.AddArc(x, y + h - 2 * r, 2 * r, 2 * r, 90, 90);
+            bubble.CloseFigure();
+            using (Pen pen = new Pen(colour, 1.8f * sc)) { pen.LineJoin = LineJoin.Round; g.DrawPath(pen, bubble); }
+        }
+        using (Brush dot = new SolidBrush(colour))
+            for (int i = -1; i <= 1; i++)
+                g.FillEllipse(dot, c.X + i * 4.2f * sc - 1.2f * sc, y + h / 2 - 1.2f * sc, 2.4f * sc, 2.4f * sc);
+    }
+
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+
+    // Her avatar: the first frame of her face (or idle) sprite strip, as a square.
+    static Image Face(ICapriHost h)
+    {
+        foreach (string strip in new[] { "face", "idle" })
+        {
+            try
+            {
+                using (Bitmap art = h.Art(strip))
+                {
+                    if (art == null || art.Height <= 0) continue;
+                    int side = Math.Min(art.Width, art.Height);
+                    Bitmap frame = new Bitmap(side, side);
+                    using (Graphics g = Graphics.FromImage(frame))
+                    {
+                        g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                        g.DrawImage(art, new Rectangle(0, 0, side, side), new Rectangle(0, 0, side, side), GraphicsUnit.Pixel);
+                    }
+                    return frame;
+                }
+            }
+            catch (Exception) { }
+        }
+        return null;
+    }
+
+    void Open()
+    {
+        Form f = Her();
+        if (f != null && f.InvokeRequired) { f.BeginInvoke((MethodInvoker)Open); return; }
+        if (window == null || window.IsDisposed)
+        {
+            ICapriHost h = capri;
+            // Pasted screenshots live in the paste mod's folder, beside this one.
+            string pictures = Path.Combine(Directory.GetParent(h.Folder).FullName, "paste-pictures-data");
+            string transcripts = Path.Combine(Directory.GetParent(Directory.GetParent(h.Folder).FullName).FullName, "transcripts");
+            window = new LogWindow(delegate { return h.Chat.Days(); }, delegate(DateTime d) { return h.Chat.Transcript(d); },
+                                   delegate(string text) { h.Chat.Send(text); }, Give, Drop, delegate { return h.Chat.Busy; },
+                                   Face(h), pictures, transcripts, delegate(string s) { h.Log("DM Capri!: " + s); });
+        }
+        window.Show();
+        if (window.WindowState == FormWindowState.Minimized) window.WindowState = FormWindowState.Normal;
+        window.Activate();
+    }
+}
+
+// One thing in the log: something said, something she did, or a picture.
+public sealed class Entry
+{
+    public string Time = "", Who = "", Text = "", Picture, Day;
+    public int Minutes;
+    public bool IsPicture { get { return Picture != null; } }
+    public bool IsEvent { get { return Picture == null && Who.Length == 0; } }
+}
+
+public static class Transcript
+{
+    static readonly Regex Said = new Regex(@"^\*\*(\d{1,2}):(\d{2}) ([^:*]+):\*\*\s?(.*)$");
+    static readonly Regex Did = new Regex(@"^\*(\d{1,2}):(\d{2}) (.+?)\*?$");
+    static readonly Regex Shot = new Regex(@"^screenshot-(\d{8})-(\d{2})(\d{2})(\d{2})");
+
+    // "**14:39 Capri:** text" and "*21:31 She glanced at your screen*"; titles and notes give null.
+    public static Entry Parse(string line)
+    {
+        Match m = Said.Match(line ?? "");
+        if (m.Success)
+        {
+            string who = m.Groups[3].Value.Trim();
+            return Make(m.Groups[1].Value, m.Groups[2].Value, who == "Capri" ? LogWindow.HerName : who, m.Groups[4].Value);
+        }
+        m = Did.Match(line ?? "");
+        return m.Success ? Make(m.Groups[1].Value, m.Groups[2].Value, "", m.Groups[3].Value) : null;
+    }
+
+    static Entry Make(string hour, string minute, string who, string text)
+    {
+        int h = int.Parse(hour, CultureInfo.InvariantCulture), mi = int.Parse(minute, CultureInfo.InvariantCulture);
+        return new Entry { Time = h.ToString("00") + ":" + minute, Minutes = h * 60 + mi, Who = who, Text = text };
+    }
+
+    // A day's lines with that day's pasted screenshots slotted in at the moment they were pasted,
+    // so each one lands just before the message it went with.
+    public static List<Entry> Day(string text, string day, string pictures)
+    {
+        List<Entry> entries = new List<Entry>();
+        foreach (string raw in (text ?? "").Replace("\r", "").Split('\n'))
+        {
+            Entry e = Parse(raw);
+            if (e != null) { e.Day = day; entries.Add(e); }
+        }
+        foreach (Entry p in Pictures(day, pictures))
+        {
+            int at = entries.Count;
+            for (int i = 0; i < entries.Count; i++) if (entries[i].Minutes > p.Minutes) { at = i; break; }
+            entries.Insert(at, p);
+        }
+        return entries;
+    }
+
+    static List<Entry> Pictures(string day, string folder)
+    {
+        List<Entry> found = new List<Entry>();
+        string stamp = day.Replace("-", "");
+        try
+        {
+            if (!Directory.Exists(folder)) return found;
+            foreach (string file in Directory.GetFiles(folder, "screenshot-" + stamp + "-*.png"))
+            {
+                Match m = Shot.Match(Path.GetFileName(file));
+                if (!m.Success) continue;
+                int h = int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture), mi = int.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture);
+                found.Add(new Entry { Time = m.Groups[2].Value + ":" + m.Groups[3].Value, Minutes = h * 60 + mi, Who = "You", Picture = file, Day = day });
+            }
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        found.Sort(delegate(Entry a, Entry b) { return string.CompareOrdinal(a.Picture, b.Picture); });
+        return found;
+    }
+}
+
+public sealed class LogWindow : Form
+{
+    internal static readonly Color Ground = Color.FromArgb(14, 14, 10), Side = Color.FromArgb(20, 20, 14), Raised = Color.FromArgb(30, 30, 20),
+        Field = Color.FromArgb(38, 37, 26), Hover = Color.FromArgb(22, 22, 15),
+        Ink = Color.FromArgb(236, 236, 241), Faint = Color.FromArgb(132, 130, 112), Her = Color.FromArgb(252, 239, 3),
+        You = Color.FromArgb(0, 230, 240), Link = Color.FromArgb(0, 200, 255), Code = Color.FromArgb(28, 28, 22);
+    internal static string HerName = "Capri";
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wide, string text);
+
+    readonly Func<string[]> days;
+    readonly Func<DateTime, string> transcript;
+    readonly Action<string> send;
+    readonly Func<string[], string> attach;      // hands pictures to her; returns their names, or null
+    readonly Action<string> sendPictures;        // pictures with no words: like dropping files on her
+    readonly Func<bool> busy;
+    readonly string pictures, transcripts;
+    readonly Action<string> log;
+    readonly ListBox dayList = new ListBox();
+    readonly Feed feed;
+    readonly TextBox search = new TextBox();
+    readonly TextBox message = new TextBox();
+    readonly Label placeholder = new Label();
+    readonly Panel bar = new Panel();
+    readonly Panel tray = new Panel();           // pictures waiting to go with the next message
+    readonly List<string> pending = new List<string>();
+    readonly List<Image> pendingThumbs = new List<Image>();
+    readonly Label typing = new Label();
+    readonly Label status = new Label();
+    readonly Timer live = new Timer();
+    string shownKey = "";
+    DateTime quickUntil = DateTime.MinValue;
+    const int Longest = 2000, MostPictures = 5, TrayThumb = 56;
+    static readonly string[] PictureTypes = { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff" };
+
+    public LogWindow(Func<string[]> days, Func<DateTime, string> transcript, Action<string> send,
+                     Func<string[], string> attach, Action<string> sendPictures, Func<bool> busy,
+                     Image avatar, string pictures, string transcripts, Action<string> log)
+    {
+        this.days = days;
+        this.transcript = transcript;
+        this.send = send;
+        this.attach = attach;
+        this.sendPictures = sendPictures;
+        this.busy = busy;
+        this.pictures = pictures;
+        this.transcripts = transcripts;
+        this.log = log;
+        feed = new Feed(avatar);
+        Text = "DM Capri!";
+        StartPosition = FormStartPosition.CenterScreen;
+        Size = new Size(960, 720);
+        MinimumSize = new Size(600, 420);
+        BackColor = Ground;
+        ForeColor = Ink;
+        Font = new Font("Segoe UI", 10f);
+
+        Panel top = new Panel { Dock = DockStyle.Top, Height = 52, BackColor = Side, Padding = new Padding(16, 12, 16, 10) };
+        Label title = new Label { Text = "DM CAPRI!", AutoSize = false, Width = 150, Dock = DockStyle.Left, ForeColor = Her, Font = new Font("Segoe UI Semibold", 12f), TextAlign = ContentAlignment.MiddleLeft };
+        Panel searchBox = new Panel { Dock = DockStyle.Fill, BackColor = Raised, Padding = new Padding(10, 6, 10, 4) };
+        search.Dock = DockStyle.Fill;
+        search.BackColor = Raised;
+        search.ForeColor = Ink;
+        search.BorderStyle = BorderStyle.None;
+        search.HandleCreated += delegate { SendMessage(search.Handle, 0x1501, new IntPtr(1), "Search every day"); };
+        search.TextChanged += delegate { ShowNow(true); };
+        searchBox.Controls.Add(search);
+        Button folder = new Button { Text = "Open folder", Dock = DockStyle.Right, Width = 118, FlatStyle = FlatStyle.Flat, ForeColor = Her, BackColor = Side, Cursor = Cursors.Default };
+        folder.FlatAppearance.BorderColor = Her;
+        folder.FlatAppearance.MouseOverBackColor = Raised;
+        folder.Click += delegate { Open(transcripts); };
+        Panel gap = new Panel { Dock = DockStyle.Right, Width = 12, BackColor = Side };
+        top.Controls.AddRange(new Control[] { searchBox, gap, folder, title });
+
+        dayList.Dock = DockStyle.Left;
+        dayList.Width = 190;
+        dayList.BackColor = Side;
+        dayList.ForeColor = Ink;
+        dayList.BorderStyle = BorderStyle.None;
+        dayList.IntegralHeight = false;
+        dayList.DrawMode = DrawMode.OwnerDrawFixed;
+        dayList.ItemHeight = 44;
+        dayList.DrawItem += DrawDay;
+        dayList.SelectedIndexChanged += delegate { if (search.Text.Length > 0) search.Text = ""; else ShowNow(true); };
+
+        // The chat bar: Enter sends, as if you'd typed it in her Type box; Shift+Enter
+        // starts a new line; Ctrl+V with a picture (or picture files) attaches it.
+        bar.Dock = DockStyle.Bottom;
+        bar.BackColor = Ground;
+        bar.Padding = new Padding(16, 4, 16, 14);
+        Panel field = new Panel { Dock = DockStyle.Fill, BackColor = Field, Padding = new Padding(14, 11, 14, 8) };
+        field.Paint += delegate(object s, PaintEventArgs e)
+        {
+            using (Pen edge = new Pen(message.Focused ? Color.FromArgb(120, Her) : Color.FromArgb(50, 50, 36)))
+                e.Graphics.DrawRectangle(edge, 0, 0, field.Width - 1, field.Height - 1);
+        };
+        message.Dock = DockStyle.Fill;
+        message.Multiline = true;
+        message.AcceptsReturn = true;
+        message.WordWrap = true;
+        message.BackColor = Field;
+        message.ForeColor = Ink;
+        message.BorderStyle = BorderStyle.None;
+        message.Font = new Font("Segoe UI", 10.5f);
+        message.GotFocus += delegate { field.Invalidate(); };
+        message.LostFocus += delegate { field.Invalidate(); };
+        message.TextChanged += delegate { Grow(); };
+        message.KeyDown += Typed;
+        // A multi-line box can't show Windows' grey hint, so a label stands in while it's empty.
+        placeholder.Text = "Message " + HerName + "   ·   Shift+Enter for a new line   ·   Ctrl+V to add a picture";
+        placeholder.AutoSize = false;
+        placeholder.Dock = DockStyle.Fill;
+        placeholder.ForeColor = Faint;
+        placeholder.BackColor = Field;
+        placeholder.Font = message.Font;
+        placeholder.Click += delegate { message.Focus(); };
+        message.TextChanged += delegate { placeholder.Visible = message.TextLength == 0; };
+        field.Controls.Add(placeholder);
+        field.Controls.Add(message);
+        placeholder.BringToFront();
+        bar.Controls.Add(field);
+
+        tray.Dock = DockStyle.Bottom;
+        tray.Height = TrayThumb + 16;
+        tray.BackColor = Ground;
+        tray.Visible = false;
+        tray.Paint += PaintTray;
+        tray.MouseClick += TrayClicked;
+        Grow();
+
+        typing.Dock = DockStyle.Bottom;
+        typing.Height = 20;
+        typing.ForeColor = Faint;
+        typing.BackColor = Ground;
+        typing.Padding = new Padding(18, 2, 0, 0);
+        typing.Font = new Font("Segoe UI", 8.5f, FontStyle.Italic);
+
+        status.Dock = DockStyle.Bottom;
+        status.Height = 24;
+        status.ForeColor = Faint;
+        status.BackColor = Side;
+        status.Padding = new Padding(14, 4, 0, 0);
+        status.Font = new Font("Segoe UI", 9f);
+
+        Controls.Add(feed);
+        Controls.Add(typing);
+        Controls.Add(tray);
+        Controls.Add(bar);
+        Controls.Add(dayList);
+        Controls.Add(top);
+        Controls.Add(status);
+
+        LoadDays();
+        // New lines and pictures show up while you chat; quicker for a minute after you send.
+        live.Interval = 1000;
+        live.Tick += delegate
+        {
+            bool thinking = false;
+            try { thinking = busy(); } catch (Exception) { }
+            typing.Text = thinking ? HerName + " is typing…" : "";
+            if (search.Text.Trim().Length > 0) return;
+            if (DateTime.Now < quickUntil || DateTime.Now.Second % 3 == 0) ShowNow(false);
+        };
+        live.Start();
+    }
+
+    void Typed(object sender, KeyEventArgs e)
+    {
+        if (e.KeyCode == Keys.Enter && !e.Shift) { e.SuppressKeyPress = true; Send(); return; }
+        if (e.KeyCode == Keys.Escape && pending.Count > 0) { e.SuppressKeyPress = true; ClearPending(); return; }
+        if (e.KeyCode == Keys.V && e.Control && !e.Alt && !e.Shift)
+        {
+            try
+            {
+                int before = pending.Count;
+                if (Clipboard.ContainsImage())
+                {
+                    using (Image picture = Clipboard.GetImage())
+                        if (picture != null) AddPending(Save(picture));
+                }
+                else if (Clipboard.ContainsFileDropList())
+                {
+                    foreach (string file in Clipboard.GetFileDropList())
+                    {
+                        if (!IsPicture(file)) continue;
+                        using (MemoryStream bytes = new MemoryStream(File.ReadAllBytes(file)))
+                        using (Image picture = Image.FromStream(bytes))
+                            AddPending(Save(picture));
+                    }
+                }
+                if (pending.Count > before) e.SuppressKeyPress = true;   // otherwise it's text: paste as usual
+            }
+            catch (Exception ex) { log("couldn't paste that picture: " + ex.Message); }
+        }
+    }
+
+    // Up to six lines tall, then it scrolls.
+    void Grow()
+    {
+        int lines = 1;
+        if (message.IsHandleCreated && message.TextLength > 0) lines = message.GetLineFromCharIndex(message.TextLength) + 1;
+        lines = Math.Max(1, Math.Min(6, lines));
+        int height = 52 + (lines - 1) * (message.Font.Height) + 14;
+        if (bar.Height != height) bar.Height = height;
+        message.ScrollBars = lines >= 6 ? ScrollBars.Vertical : ScrollBars.None;
+    }
+
+    static bool IsPicture(string file)
+    {
+        try
+        {
+            return Array.IndexOf(PictureTypes, Path.GetExtension(file).ToLowerInvariant()) >= 0
+                && File.Exists(file) && new FileInfo(file).Length <= 50L * 1024 * 1024;
+        }
+        catch (Exception) { return false; }
+    }
+
+    // Waiting pictures sit in a temp folder; sending moves them to where the log shows them.
+    static readonly string Waiting = Path.Combine(Path.GetTempPath(), "capri-chat-bar");
+
+    string Save(Image picture)
+    {
+        Directory.CreateDirectory(Waiting);
+        string pictures = Waiting;
+        double scale = Math.Min(1.0, (double)Longest / Math.Max(picture.Width, picture.Height));
+        int w = Math.Max(1, (int)Math.Round(picture.Width * scale)), h = Math.Max(1, (int)Math.Round(picture.Height * scale));
+        string path = Path.Combine(pictures, "screenshot-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture) + ".png");
+        using (Bitmap shot = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format24bppRgb))
+        using (Graphics g = Graphics.FromImage(shot))
+        {
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.DrawImage(picture, 0, 0, w, h);
+            shot.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+        }
+        return path;
+    }
+
+    void AddPending(string path)
+    {
+        if (pending.Count >= MostPictures) { try { File.Delete(path); } catch (Exception) { } return; }
+        pending.Add(path);
+        try
+        {
+            using (MemoryStream bytes = new MemoryStream(File.ReadAllBytes(path)))
+            using (Image full = Image.FromStream(bytes))
+            {
+                double scale = (double)TrayThumb / Math.Max(full.Width, full.Height);
+                Bitmap small = new Bitmap(Math.Max(1, (int)(full.Width * scale)), Math.Max(1, (int)(full.Height * scale)));
+                using (Graphics g = Graphics.FromImage(small)) { g.InterpolationMode = InterpolationMode.HighQualityBicubic; g.DrawImage(full, 0, 0, small.Width, small.Height); }
+                pendingThumbs.Add(small);
+            }
+        }
+        catch (Exception) { pendingThumbs.Add(null); }
+        tray.Visible = true;
+        tray.Invalidate();
+    }
+
+    // Removing a picture before sending also deletes its copy, so it never shows in the log.
+    void RemovePending(int i, bool deleteFile)
+    {
+        if (deleteFile) try { File.Delete(pending[i]); } catch (Exception) { }
+        if (pendingThumbs[i] != null) pendingThumbs[i].Dispose();
+        pending.RemoveAt(i);
+        pendingThumbs.RemoveAt(i);
+        tray.Visible = pending.Count > 0;
+        tray.Invalidate();
+    }
+
+    void ClearPending() { while (pending.Count > 0) RemovePending(0, true); }
+
+    Rectangle TraySlot(int i) { return new Rectangle(18 + i * (TrayThumb + 12), 8, TrayThumb, TrayThumb); }
+    static Rectangle CloseBox(Rectangle slot) { return new Rectangle(slot.Right - 18, slot.Y - 4, 22, 22); }
+
+    void PaintTray(object sender, PaintEventArgs e)
+    {
+        Graphics g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        for (int i = 0; i < pending.Count; i++)
+        {
+            Rectangle slot = TraySlot(i);
+            using (Brush back = new SolidBrush(Raised)) g.FillRectangle(back, slot);
+            Image t = pendingThumbs[i];
+            if (t != null) g.DrawImage(t, slot.X + (slot.Width - t.Width) / 2, slot.Y + (slot.Height - t.Height) / 2, t.Width, t.Height);
+            using (Pen edge = new Pen(Color.FromArgb(120, You))) g.DrawRectangle(edge, slot);
+            Rectangle x = CloseBox(slot);
+            using (Brush dot = new SolidBrush(Color.FromArgb(220, 60, 60))) g.FillEllipse(dot, x);
+            TextRenderer.DrawText(g, "×", new Font("Segoe UI Semibold", 10f), x, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        }
+        string note = pending.Count == 1 ? "1 picture goes with your next message  ·  Esc removes it" : pending.Count + " pictures go with your next message  ·  Esc removes them";
+        TextRenderer.DrawText(g, note, new Font("Segoe UI", 8.5f), new Point(TraySlot(pending.Count).X + 4, 8 + TrayThumb / 2 - 8), Faint);
+    }
+
+    void TrayClicked(object sender, MouseEventArgs e)
+    {
+        for (int i = 0; i < pending.Count; i++)
+            if (CloseBox(TraySlot(i)).Contains(e.Location) || TraySlot(i).Contains(e.Location)) { RemovePending(i, true); return; }
+    }
+
+    void Send()
+    {
+        string text = message.Text.Trim();
+        if (text.Length == 0 && pending.Count == 0) return;
+        try
+        {
+            if (pending.Count > 0)
+            {
+                // Into the log's picture folder, so the chat shows them once sent.
+                Directory.CreateDirectory(pictures);
+                for (int i = 0; i < pending.Count; i++)
+                {
+                    string moved = Path.Combine(pictures, Path.GetFileName(pending[i]));
+                    if (!File.Exists(moved)) File.Move(pending[i], moved);
+                    pending[i] = moved;
+                }
+                // The pictures are handed to her first; the next thing she hears takes them along.
+                string names = attach(pending.ToArray());
+                if (string.IsNullOrEmpty(names)) { log("she couldn't take those pictures"); return; }
+                if (text.Length > 0) send(text);
+                else sendPictures(names);
+                while (pending.Count > 0) RemovePending(0, false);   // keep the files: the log shows them
+            }
+            else send(text);
+        }
+        catch (Exception e) { log("couldn't send: " + e.Message); return; }
+        message.Clear();
+        // Show today, where the message lands, and keep checking quickly for her answer.
+        if (search.Text.Length > 0) search.Text = "";
+        string today = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        int at = dayList.Items.IndexOf(today);
+        if (at >= 0 && dayList.SelectedIndex != at) dayList.SelectedIndex = at;
+        quickUntil = DateTime.Now.AddSeconds(90);
+        feed.JumpToEnd();
+    }
+
+    void DrawDay(object sender, DrawItemEventArgs e)
+    {
+        if (e.Index < 0) return;
+        string day = (string)dayList.Items[e.Index];
+        bool chosen = (e.State & DrawItemState.Selected) != 0;
+        using (Brush back = new SolidBrush(chosen ? Raised : Side)) e.Graphics.FillRectangle(back, e.Bounds);
+        if (chosen) using (Brush bar = new SolidBrush(Her)) e.Graphics.FillRectangle(bar, e.Bounds.X, e.Bounds.Y + 8, 3, e.Bounds.Height - 16);
+        Rectangle words = new Rectangle(e.Bounds.X + 16, e.Bounds.Y + 4, e.Bounds.Width - 20, 20);
+        TextRenderer.DrawText(e.Graphics, Friendly(day), new Font("Segoe UI Semibold", 10f), words, chosen ? Her : Ink, TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+        words.Y += 19;
+        TextRenderer.DrawText(e.Graphics, day, new Font("Segoe UI", 8.5f), words, Faint, TextFormatFlags.Left);
+    }
+
+    internal static string Friendly(string day)
+    {
+        DateTime when;
+        if (!DateTime.TryParseExact(day, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out when)) return day;
+        if (when.Date == DateTime.Today) return "Today";
+        if (when.Date == DateTime.Today.AddDays(-1)) return "Yesterday";
+        return when.ToString(when.Year == DateTime.Today.Year ? "ddd d MMM" : "ddd d MMM yyyy", CultureInfo.CurrentCulture);
+    }
+
+    void LoadDays()
+    {
+        string keep = dayList.SelectedItem as string;
+        List<string> all = new List<string>(days() ?? new string[0]);
+        all.Sort(StringComparer.Ordinal);
+        all.Reverse();
+        dayList.BeginUpdate();
+        dayList.Items.Clear();
+        foreach (string d in all) dayList.Items.Add(d);
+        dayList.EndUpdate();
+        if (dayList.Items.Count > 0) dayList.SelectedIndex = Math.Max(0, keep == null ? 0 : dayList.Items.IndexOf(keep));
+        else feed.Show(new List<Entry> { new Entry { Text = "No chats saved yet. Say hi below and they'll show up here." } }, true);
+    }
+
+    string Read(string day)
+    {
+        DateTime when;
+        if (!DateTime.TryParseExact(day, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out when)) return "";
+        try { return transcript(when) ?? ""; }
+        catch (Exception e) { log(e.Message); return ""; }
+    }
+
+    void ShowNow(bool force)
+    {
+        string today = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        if (!dayList.Items.Contains(today) && Array.IndexOf(days() ?? new string[0], today) >= 0) { LoadDays(); return; }
+        string query = search.Text.Trim();
+        List<Entry> entries;
+        string label;
+        if (query.Length > 0)
+        {
+            entries = new List<Entry>();
+            foreach (object item in dayList.Items)
+                foreach (Entry e in Transcript.Day(Read((string)item), (string)item, pictures))
+                    if (!e.IsPicture && e.Text.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0) entries.Add(e);
+            label = entries.Count + " messages match \"" + query + "\"";
+            if (entries.Count == 0) entries.Add(new Entry { Text = "Nothing matches \"" + query + "\"." });
+        }
+        else
+        {
+            string day = dayList.SelectedItem as string;
+            if (day == null) return;
+            entries = Transcript.Day(Read(day), day, pictures);
+            int said = 0, shots = 0;
+            foreach (Entry e in entries) { if (e.IsPicture) shots++; else if (!e.IsEvent) said++; }
+            label = Friendly(day) + "  ·  " + said + " messages" + (shots > 0 ? "  ·  " + shots + (shots == 1 ? " picture" : " pictures") : "");
+            if (entries.Count == 0) entries.Add(new Entry { Text = "Nothing said this day." });
+        }
+        string key = query + "|" + (dayList.SelectedItem as string) + "|" + Signature(entries);
+        if (!force && key == shownKey) return;
+        bool newDay = force || !shownKey.StartsWith(query + "|" + (dayList.SelectedItem as string) + "|", StringComparison.Ordinal);
+        shownKey = key;
+        feed.Show(entries, newDay, query.Length > 0);
+        status.Text = label;
+    }
+
+    static string Signature(List<Entry> entries)
+    {
+        return entries.Count + ":" + (entries.Count == 0 ? "" : entries[entries.Count - 1].Time + entries[entries.Count - 1].Text + entries[entries.Count - 1].Picture);
+    }
+
+    internal static void Open(string path)
+    {
+        try { if (File.Exists(path) || Directory.Exists(path)) Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
+        catch (Exception) { }
+    }
+
+    // Only web links, opened in your browser.
+    internal static void OpenLink(string url)
+    {
+        if (url.StartsWith("www.", StringComparison.OrdinalIgnoreCase)) url = "https://" + url;
+        Uri uri;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)) return;
+        try { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); }
+        catch (Exception) { }
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        BeginInvoke((MethodInvoker)delegate { feed.JumpToEnd(); message.Focus(); Grow(); });
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        ClearPending();      // unsent pictures don't linger
+        live.Stop();
+        live.Dispose();
+        feed.Release();
+        base.OnFormClosed(e);
+    }
+}
+
+// One run of text with its look: plain, bold, italic, code, or a link.
+sealed class Piece
+{
+    public string Text, Link;
+    public Font Font;
+    public Color Color;
+    public bool Code;
+    public Rectangle Box;       // where it's drawn, relative to the row
+}
+
+// One row in the feed: a message with its header, a follow-on message, a picture or an event.
+sealed class Row
+{
+    public Entry E;
+    public bool Head;
+    public int Y, Height;
+    public Rectangle Picture;   // relative to the row
+    public List<Piece> Pieces = new List<Piece>();
+}
+
+// The conversation, drawn by hand Discord-style: avatar, name and time, then
+// the messages, with back-to-back ones from the same person grouped under one header.
+public sealed class Feed : Panel
+{
+    const int Pad = 16, Avatar = 40, Indent = Pad + Avatar + 16, GroupMinutes = 5;
+    internal static int MaxPicture = 300;           // from the mod's Options
+    internal static float TextSize = 10.5f;
+    static readonly Regex Marks = new Regex(@"(?<link>(?:https?://|www\.)[^\s<>""]+)|\*\*(?<bold>[^*]+)\*\*|(?<![*\w])\*(?<italic>[^*\s][^*]*)\*(?![*\w])|`(?<code>[^`]+)`");
+    readonly List<Entry> entries = new List<Entry>();
+    readonly List<Row> rows = new List<Row>();
+    readonly Dictionary<string, Image> thumbs = new Dictionary<string, Image>();
+    readonly Font text, bold, italic, code, small, name;
+    readonly Image herFace;
+    bool searching, wantEnd;
+    int contentHeight, hovered = -1, laidWidth;
+    string lastRight;
+
+    public Feed(Image avatar)
+    {
+        herFace = avatar;
+        text = new Font("Segoe UI", TextSize);
+        bold = new Font("Segoe UI Semibold", TextSize);
+        italic = new Font("Segoe UI", TextSize, FontStyle.Italic);
+        code = new Font("Consolas", TextSize - 0.5f);
+        small = new Font("Segoe UI", 8.5f);
+        name = new Font("Segoe UI Semibold", 10.5f);
+        Dock = DockStyle.Fill;
+        BackColor = LogWindow.Ground;
+        DoubleBuffered = true;
+        AutoScroll = true;
+        SetStyle(ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
+        MouseClick += Clicked;
+        MouseMove += Moved;
+        MouseLeave += delegate { if (hovered >= 0) { hovered = -1; Invalidate(); } };
+        ContextMenuStrip = new ContextMenuStrip();
+        ContextMenuStrip.Items.Add("Copy message", null, delegate { if (lastRight != null) Clipboard.SetText(lastRight); });
+        MouseDown += delegate(object s, MouseEventArgs e) { if (e.Button == MouseButtons.Right) { int i = RowAt(e.Location); lastRight = i >= 0 && !rows[i].E.IsPicture ? rows[i].E.Text : null; } };
+    }
+
+    public void Show(List<Entry> list, bool jumpToEnd, bool search = false)
+    {
+        bool atEnd = AtEnd;
+        entries.Clear();
+        entries.AddRange(list);
+        searching = search;
+        wantEnd = jumpToEnd || atEnd;
+        Arrange();
+        GoToEnd();
+        Invalidate();
+    }
+
+    bool AtEnd { get { return -AutoScrollPosition.Y + ClientSize.Height >= contentHeight - 40; } }
+
+    public void JumpToEnd() { wantEnd = true; GoToEnd(); Invalidate(); }
+
+    void GoToEnd()
+    {
+        if (!wantEnd || !IsHandleCreated || ClientSize.Height <= 0) return;
+        int target = Math.Max(0, contentHeight - ClientSize.Height);
+        AutoScrollPosition = new Point(0, target);
+        wantEnd = -AutoScrollPosition.Y < target - 2;
+    }
+
+    protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); GoToEnd(); }
+    protected override void OnVisibleChanged(EventArgs e) { base.OnVisibleChanged(e); if (Visible) { Arrange(); GoToEnd(); } }
+
+    public void Release()
+    {
+        foreach (Image i in thumbs.Values) if (i != null) i.Dispose();
+        thumbs.Clear();
+    }
+
+    int TextWide { get { return Math.Max(160, ClientSize.Width - Indent - Pad - 10); } }
+
+    protected override void OnResize(EventArgs e)
+    {
+        bool atEnd = AtEnd;
+        base.OnResize(e);
+        if (ClientSize.Width != laidWidth) Arrange();
+        if (atEnd) wantEnd = true;
+        GoToEnd();
+    }
+
+    // Same person, same day, within a few minutes, and nothing in between: no new header.
+    static bool Follows(Entry prev, Entry e)
+    {
+        return prev != null && !prev.IsEvent && !e.IsEvent && prev.Who == e.Who && prev.Day == e.Day
+            && e.Minutes - prev.Minutes >= 0 && e.Minutes - prev.Minutes <= GroupMinutes;
+    }
+
+    void Arrange()
+    {
+        rows.Clear();
+        laidWidth = ClientSize.Width;
+        int y = Pad;
+        string lastDay = null;
+        Entry prev = null;
+        using (Graphics g = CreateGraphics())
+            foreach (Entry e in entries)
+            {
+                if (searching && e.Day != lastDay && e.Day != null) { y += 30; lastDay = e.Day; prev = null; }
+                Row r = new Row { E = e, Head = !Follows(prev, e) };
+                int top = r.Head ? (prev == null ? 4 : 16) : 2;
+                int body = r.Head && !e.IsEvent ? 22 : 0;
+                if (e.IsEvent)
+                {
+                    Size s = TextRenderer.MeasureText(g, Line(e), small, new Size(ClientSize.Width - 2 * Pad - 80, int.MaxValue), TextFormatFlags.WordBreak);
+                    r.Height = top + s.Height + 6;
+                }
+                else if (e.IsPicture)
+                {
+                    Image t = Thumb(e.Picture);
+                    Size s = t == null ? new Size(220, 40) : t.Size;
+                    r.Picture = new Rectangle(Indent, top + body, s.Width, s.Height);
+                    r.Height = top + body + s.Height + 4;
+                }
+                else
+                {
+                    int h = Wrap(g, e.Text, r.Pieces, Indent, top + body, TextWide);
+                    r.Height = top + body + h + 2;
+                }
+                r.Y = y;
+                rows.Add(r);
+                y += r.Height;
+                prev = e;
+            }
+        contentHeight = y + Pad;
+        AutoScrollMinSize = new Size(0, contentHeight);
+    }
+
+    static string Line(Entry e) { return (e.Time.Length > 0 ? e.Time + "  ·  " : "") + e.Text; }
+
+    // Splits the message into styled runs (links, **bold**, *italic*, `code`),
+    // then lays them out word by word, wrapping at the width. Returns the height.
+    int Wrap(Graphics g, string message, List<Piece> into, int left, int top, int width)
+    {
+        List<Piece> runs = new List<Piece>();
+        int at = 0;
+        foreach (Match m in Marks.Matches(message ?? ""))
+        {
+            if (m.Index > at) runs.Add(new Piece { Text = message.Substring(at, m.Index - at), Font = text, Color = LogWindow.Ink });
+            if (m.Groups["link"].Success)
+            {
+                string url = m.Groups["link"].Value.TrimEnd('.', ',', '!', '?', ';', ':', ')', '\'', '"');
+                runs.Add(new Piece { Text = url, Font = text, Color = LogWindow.Link, Link = url });
+                if (url.Length < m.Length) runs.Add(new Piece { Text = m.Value.Substring(url.Length), Font = text, Color = LogWindow.Ink });
+            }
+            else if (m.Groups["bold"].Success) runs.Add(new Piece { Text = m.Groups["bold"].Value, Font = bold, Color = LogWindow.Ink });
+            else if (m.Groups["italic"].Success) runs.Add(new Piece { Text = m.Groups["italic"].Value, Font = italic, Color = LogWindow.Ink });
+            else runs.Add(new Piece { Text = m.Groups["code"].Value, Font = code, Color = LogWindow.Ink, Code = true });
+            at = m.Index + m.Length;
+        }
+        if (at < (message ?? "").Length) runs.Add(new Piece { Text = message.Substring(at), Font = text, Color = LogWindow.Ink });
+
+        const TextFormatFlags Exact = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
+        int lineHeight = text.Height + 2, x = 0, y = 0;
+        foreach (Piece run in runs)
+            foreach (string part in Regex.Split(run.Text.Replace("\r", ""), @"(\n|\s+)"))
+            {
+                if (part.Length == 0) continue;
+                if (part == "\n") { x = 0; y += lineHeight; continue; }
+                bool space = part.Trim().Length == 0;
+                if (space && x == 0) continue;                       // no spaces at the start of a line
+                string word = space ? " " : part;
+                int w = TextRenderer.MeasureText(g, word, run.Font, Size.Empty, Exact).Width;
+                if (!space && x + w > width && x > 0) { x = 0; y += lineHeight; }
+                // A word longer than the line (usually a link) is broken where it has to be.
+                while (!space && w > width)
+                {
+                    int fit = word.Length - 1;
+                    while (fit > 1 && TextRenderer.MeasureText(g, word.Substring(0, fit), run.Font, Size.Empty, Exact).Width > width - x) fit--;
+                    into.Add(Copy(run, word.Substring(0, fit), new Rectangle(left + x, top + y, width - x, lineHeight)));
+                    word = word.Substring(fit);
+                    x = 0;
+                    y += lineHeight;
+                    w = TextRenderer.MeasureText(g, word, run.Font, Size.Empty, Exact).Width;
+                }
+                if (space && x + w > width) continue;
+                into.Add(Copy(run, word, new Rectangle(left + x, top + y, w, lineHeight)));
+                x += w;
+            }
+        return y + lineHeight;
+    }
+
+    static Piece Copy(Piece run, string word, Rectangle box)
+    {
+        return new Piece { Text = word, Font = run.Font, Color = run.Color, Link = run.Link, Code = run.Code, Box = box };
+    }
+
+    Image Thumb(string path)
+    {
+        Image t;
+        if (thumbs.TryGetValue(path, out t)) return t;
+        try
+        {
+            // Read into memory and shrink, so the file isn't locked and the full picture isn't kept.
+            using (MemoryStream bytes = new MemoryStream(File.ReadAllBytes(path)))
+            using (Image full = Image.FromStream(bytes))
+            {
+                double scale = Math.Min(1.0, Math.Min((double)MaxPicture / full.Width, (double)MaxPicture / full.Height));
+                Bitmap shrunk = new Bitmap(Math.Max(1, (int)(full.Width * scale)), Math.Max(1, (int)(full.Height * scale)));
+                using (Graphics g = Graphics.FromImage(shrunk))
+                {
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(full, 0, 0, shrunk.Width, shrunk.Height);
+                }
+                t = shrunk;
+            }
+        }
+        catch (Exception) { t = null; }
+        thumbs[path] = t;
+        return t;
+    }
+
+    protected override void OnPaint(PaintEventArgs pe)
+    {
+        base.OnPaint(pe);
+        Graphics g = pe.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        // Positions are moved by the scroll offset one by one: TextRenderer ignores
+        // Graphics transforms, so a TranslateTransform would leave the text behind.
+        int dy = AutoScrollPosition.Y;
+        Rectangle seen = ClientRectangle;
+        string lastDay = null;
+        for (int i = 0; i < rows.Count; i++)
+        {
+            Row r = rows[i];
+            Entry e = r.E;
+            int y = r.Y + dy;
+            if (searching && e.Day != lastDay && e.Day != null)
+            {
+                lastDay = e.Day;
+                DayDivider(g, LogWindow.Friendly(e.Day), y - 26);
+            }
+            if (y + r.Height < 0 || y > seen.Height) continue;
+            if (i == hovered && !e.IsEvent) using (Brush b = new SolidBrush(LogWindow.Hover)) g.FillRectangle(b, 0, y, ClientSize.Width, r.Height);
+            if (e.IsEvent)
+            {
+                TextRenderer.DrawText(g, Line(e), small, new Rectangle(Pad + 40, y + (r.Head ? 8 : 2), ClientSize.Width - 2 * Pad - 80, r.Height),
+                    LogWindow.Faint, TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak);
+                continue;
+            }
+            bool you = e.Who == "You";
+            int top = r.Head ? (i == 0 || (searching && rows[i - 1].E.Day != e.Day) ? 4 : 16) : 2;
+            if (r.Head)
+            {
+                DrawAvatar(g, new Rectangle(Pad, y + top, Avatar, Avatar), you);
+                Size nameSize = TextRenderer.MeasureText(g, e.Who, name, Size.Empty, TextFormatFlags.NoPadding);
+                TextRenderer.DrawText(g, e.Who, name, new Point(Indent, y + top), you ? LogWindow.You : LogWindow.Her, TextFormatFlags.NoPadding);
+                TextRenderer.DrawText(g, Stamp(e), small, new Point(Indent + nameSize.Width + 8, y + top + 3), LogWindow.Faint, TextFormatFlags.NoPadding);
+            }
+            else if (i == hovered)
+                TextRenderer.DrawText(g, e.Time, small, new Rectangle(0, y + 4, Indent - 8, 16), LogWindow.Faint, TextFormatFlags.Right | TextFormatFlags.NoPadding);
+            if (e.IsPicture)
+            {
+                Image t = Thumb(e.Picture);
+                Rectangle box = r.Picture;
+                box.Offset(0, y);
+                using (GraphicsPath path = Round(box, 8))
+                {
+                    if (t != null) { g.SetClip(path); g.DrawImage(t, box.X, box.Y, t.Width, t.Height); g.ResetClip(); }
+                    else
+                    {
+                        using (Brush back = new SolidBrush(LogWindow.Raised)) g.FillPath(back, path);
+                        TextRenderer.DrawText(g, "Picture no longer saved", small, box, LogWindow.Faint, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    }
+                }
+                continue;
+            }
+            foreach (Piece p in r.Pieces)
+            {
+                Rectangle box = p.Box;
+                box.Offset(0, y);
+                if (p.Code) using (Brush back = new SolidBrush(LogWindow.Code)) g.FillRectangle(back, box.X - 1, box.Y + 1, box.Width + 2, box.Height - 2);
+                TextRenderer.DrawText(g, p.Text, p.Font, box.Location, p.Color, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+                if (p.Link != null) using (Pen under = new Pen(Color.FromArgb(140, p.Color))) g.DrawLine(under, box.X, box.Bottom - 3, box.Right, box.Bottom - 3);
+            }
+        }
+    }
+
+    static string Stamp(Entry e)
+    {
+        string day = e.Day == null ? "" : LogWindow.Friendly(e.Day);
+        if (day == "Today") return "Today at " + e.Time;
+        if (day == "Yesterday") return "Yesterday at " + e.Time;
+        return day.Length > 0 ? day + " " + e.Time : e.Time;
+    }
+
+    void DayDivider(Graphics g, string label, int y)
+    {
+        Size s = TextRenderer.MeasureText(g, label, small);
+        int mid = ClientSize.Width / 2;
+        using (Pen line = new Pen(Color.FromArgb(60, 60, 44)))
+        {
+            g.DrawLine(line, Pad, y + 10, mid - s.Width / 2 - 8, y + 10);
+            g.DrawLine(line, mid + s.Width / 2 + 8, y + 10, ClientSize.Width - Pad, y + 10);
+        }
+        TextRenderer.DrawText(g, label, small, new Point(mid - s.Width / 2, y + 3), LogWindow.Faint);
+    }
+
+    void DrawAvatar(Graphics g, Rectangle box, bool you)
+    {
+        using (GraphicsPath circle = new GraphicsPath())
+        {
+            circle.AddEllipse(box);
+            if (!you && herFace != null)
+            {
+                using (Brush back = new SolidBrush(LogWindow.Raised)) g.FillPath(back, circle);
+                g.SetClip(circle);
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.DrawImage(herFace, box);
+                g.ResetClip();
+                return;
+            }
+            using (Brush back = new SolidBrush(you ? Color.FromArgb(0, 70, 78) : Color.FromArgb(70, 66, 8))) g.FillPath(back, circle);
+            string letter = you ? "Y" : LogWindow.HerName.Substring(0, 1);
+            TextRenderer.DrawText(g, letter, name, box, you ? LogWindow.You : LogWindow.Her, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        }
+    }
+
+    static GraphicsPath Round(Rectangle r, int radius)
+    {
+        GraphicsPath p = new GraphicsPath();
+        int d = radius * 2;
+        p.AddArc(r.X, r.Y, d, d, 180, 90);
+        p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+        p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+        p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+        p.CloseFigure();
+        return p;
+    }
+
+    int RowAt(Point p)
+    {
+        int y = p.Y - AutoScrollPosition.Y;
+        for (int i = 0; i < rows.Count; i++) if (y >= rows[i].Y && y < rows[i].Y + rows[i].Height) return i;
+        return -1;
+    }
+
+    // What's under the mouse: a link, a picture, or nothing.
+    string LinkAt(Point p, out string picture)
+    {
+        picture = null;
+        int i = RowAt(p);
+        if (i < 0) return null;
+        Row r = rows[i];
+        Point inRow = new Point(p.X, p.Y - AutoScrollPosition.Y - r.Y);
+        if (r.E.IsPicture && r.Picture.Contains(inRow)) { picture = r.E.Picture; return null; }
+        foreach (Piece piece in r.Pieces) if (piece.Link != null && piece.Box.Contains(inRow)) return piece.Link;
+        return null;
+    }
+
+    void Moved(object sender, MouseEventArgs e)
+    {
+        int i = RowAt(e.Location);
+        if (i != hovered) { hovered = i; Invalidate(); }
+        string picture;
+        string link = LinkAt(e.Location, out picture);
+        Cursor = link != null || picture != null ? Cursors.Hand : Cursors.Default;
+    }
+
+    void Clicked(object sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left) return;
+        string picture;
+        string link = LinkAt(e.Location, out picture);
+        if (link != null) LogWindow.OpenLink(link);
+        else if (picture != null) LogWindow.Open(picture);
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs e) { base.OnMouseWheel(e); Invalidate(); }
+    protected override void OnScroll(ScrollEventArgs se) { base.OnScroll(se); Invalidate(); }
+}
+
+// ---- Options page (Quaisar_THM's shared toolkit) -------------------------------
+// An Options page under Mainframe > Mods, in her colours. Every value lives in
+// this mod's own Store, so it survives restarts and updates. Toggles and
+// numbers apply as you change them; text applies on Enter or when you click away.
+sealed class Opts
+{
+    static readonly Color Back = Color.FromArgb(16, 15, 8), Ink = Color.FromArgb(236, 236, 241),
+        Dim = Color.FromArgb(150, 146, 120), Yellow = Color.FromArgb(252, 239, 3),
+        Cyan = Color.FromArgb(5, 202, 237), Field = Color.FromArgb(30, 29, 14), Edge = Color.FromArgb(90, 86, 10);
+    const int Wide = 690, Right = 470;
+
+    delegate int Row(Control page, int y);
+    readonly ICapriHost host;
+    readonly List<Row> rows = new List<Row>();
+
+    public Opts(ICapriHost host, string title)
+    {
+        this.host = host;
+        host.Ui.SetOptions(title, Build);
+    }
+
+    // Reading values, with sane fallbacks for anything missing or out of range.
+    public bool Flag(string key, bool def) { try { return host.Store.Flag(key, def); } catch (Exception) { return def; } }
+    public double Num(string key, double def, double min, double max)
+    {
+        double v;
+        try { v = host.Store.Number(key, def); } catch (Exception) { v = def; }
+        return double.IsNaN(v) ? def : Math.Max(min, Math.Min(max, v));
+    }
+    public string Str(string key, string def)
+    {
+        try { string v = host.Store.Get(key, def); return v ?? def; } catch (Exception) { return def; }
+    }
+
+    public void Section(string title)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            System.Windows.Forms.Label l = Text(title.ToUpperInvariant(), 18, y + (y > 14 ? 10 : 0), Wide);
+            l.ForeColor = Cyan;
+            l.Font = new Font("Segoe UI Semibold", 9.5f);
+            p.Controls.Add(l);
+            return l.Bottom + 8;
+        });
+    }
+
+    public void Note(string text)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            System.Windows.Forms.Label l = Text(text, 18, y, Wide);
+            l.ForeColor = Dim;
+            l.Font = new Font("Segoe UI", 8.5f);
+            l.Height = TextRenderer.MeasureText(text, l.Font, new Size(Wide, 0), TextFormatFlags.WordBreak).Height + 4;
+            p.Controls.Add(l);
+            return l.Bottom + 8;
+        });
+    }
+
+    public void Toggle(string label, string key, bool def, Action<bool> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
+            Button off = Pill("OFF", Right + 50, y), on = Pill("ON", Right + 140, y);
+            MethodInvoker paint = delegate
+            {
+                bool v = Flag(key, def);
+                Lit(on, v);
+                Lit(off, !v);
+            };
+            off.Click += delegate { Save(key, false); paint(); Tell(changed, false); };
+            on.Click += delegate { Save(key, true); paint(); Tell(changed, true); };
+            paint();
+            p.Controls.Add(off);
+            p.Controls.Add(on);
+            return y + 42;
+        });
+    }
+
+    public void Number(string label, string key, double def, double min, double max, double step, int decimals, Action<double> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
+            NumericUpDown box = new NumericUpDown
+            {
+                Left = Right + 50, Top = y + 2, Width = 170, DecimalPlaces = decimals,
+                Minimum = (decimal)min, Maximum = (decimal)max, Increment = (decimal)step,
+                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f), TextAlign = HorizontalAlignment.Center,
+            };
+            box.Value = (decimal)Num(key, def, min, max);
+            box.ValueChanged += delegate
+            {
+                double v = (double)box.Value;
+                try { host.Store.Set(key, v); } catch (Exception) { }
+                Tell(changed, v);
+            };
+            p.Controls.Add(box);
+            return y + 42;
+        });
+    }
+
+    public void Text(string label, string key, string def, Action<string> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y, Wide));
+            TextBox box = new TextBox
+            {
+                Left = 18, Top = y + 24, Width = Wide, Text = Str(key, def),
+                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f),
+            };
+            string applied = box.Text;
+            MethodInvoker apply = delegate
+            {
+                if (box.Text == applied) return;
+                applied = box.Text;
+                try { host.Store.Set(key, applied); } catch (Exception) { }
+                Tell(changed, applied);
+            };
+            box.Leave += delegate { apply(); };
+            box.KeyDown += delegate(object s, KeyEventArgs e)
+            {
+                if (e.KeyCode != Keys.Enter) return;
+                e.SuppressKeyPress = true;
+                apply();
+            };
+            p.Controls.Add(box);
+            return box.Bottom + 12;
+        });
+    }
+
+    Control Build()
+    {
+        Panel page = new Panel { Width = Wide + 36, BackColor = Back, ForeColor = Ink, Font = new Font("Segoe UI", 9.5f) };
+        int y = 14;
+        foreach (Row r in rows) y = r(page, y);
+        page.Height = y + 10;
+        return page;
+    }
+
+    void Save(string key, bool v) { try { host.Store.Set(key, v); } catch (Exception) { } }
+
+    // A setting that fails to apply is logged, never thrown into her window.
+    void Tell<T>(Action<T> changed, T value)
+    {
+        if (changed == null) return;
+        try { changed(value); }
+        catch (Exception e) { try { host.Log("Options: " + e.Message); } catch (Exception) { } }
+    }
+
+    static System.Windows.Forms.Label Text(string text, int x, int y, int width)
+    {
+        return new System.Windows.Forms.Label { Text = text, Left = x, Top = y, Width = width, AutoSize = false, Height = 22, ForeColor = Ink, BackColor = Color.Transparent };
+    }
+
+    static Button Pill(string text, int x, int y)
+    {
+        Button b = new Button { Text = text, Left = x, Top = y, Width = 84, Height = 30, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Default, Font = new Font("Segoe UI Semibold", 9f) };
+        b.FlatAppearance.BorderColor = Edge;
+        return b;
+    }
+
+    static void Lit(Button b, bool lit)
+    {
+        b.BackColor = lit ? Yellow : Field;
+        b.ForeColor = lit ? Back : Ink;
+        b.FlatAppearance.BorderColor = lit ? Yellow : Edge;
+    }
+
+    // "a, b ,c" -> ["a","b","c"], blanks dropped.
+    public static List<string> Words(string list)
+    {
+        List<string> words = new List<string>();
+        foreach (string w in (list ?? "").Split(','))
+            if (w.Trim().Length > 0) words.Add(w.Trim());
+        return words;
+    }
+}
