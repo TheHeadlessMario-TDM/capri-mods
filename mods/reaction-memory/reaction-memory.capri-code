@@ -1,287 +1,287 @@
-// capri-mod: 1
-// id: reaction-memory
-// name: Reaction Memory
-// version: 1.0.0
-// author: Quaisar_THM
-// description: She remembers what she just said out loud on her own (reactions, greetings, check-ins), so when you answer one of them she knows what you mean.
-// requires: api 3
-// permissions: voice,chat
-
-using System;
-using System.Collections.Generic;
-using System.Text;
-using CapriDesktop;
-using System.Drawing;
-using System.Windows.Forms;
-
-public class OwnLines : ICapriMod
-{
-    int keep = 12;                                       // lines remembered
-    TimeSpan fresh = TimeSpan.FromMinutes(30);
-    bool sayReplies = false;
-    Opts opts;
-
-    struct Said { public DateTime At; public string Source, Text; }
-
-    ICapriHost capri;
-    readonly List<Said> said = new List<Said>();
-    readonly object gate = new object();
-    Action<CapriMessage> speaking;
-    Func<string> context;
-
-    public void Start(ICapriHost host)
-    {
-        capri = host;
-        if (opts == null)
-        {
-            opts = new Opts(host, "Reaction Memory");
-            opts.Section("What she remembers");
-            opts.Number("Lines she remembers", "keep", 12, 1, 50, 1, 0, delegate(double v) { keep = (int)v; Trim(); });
-            opts.Number("Forget them after (minutes)", "minutes", 30, 1, 240, 5, 0, delegate(double v) { fresh = TimeSpan.FromMinutes(v); });
-            opts.Toggle("Also remember her chat replies (they're usually already in the chat)", "replies", false, delegate(bool v) { sayReplies = v; });
-            opts.Note("Her own lines are reactions, greetings, check-ins and idle chatter. These get added to every message you send her, so she knows what you're answering.");
-        }
-        keep = (int)opts.Num("keep", 12, 1, 50);
-        fresh = TimeSpan.FromMinutes(opts.Num("minutes", 30, 1, 240));
-        sayReplies = opts.Flag("replies", false);
-        stopped = false;
-        speaking = OnSpeaking;
-        context = Context;
-        host.Voice.Speaking += speaking;
-        if (!contextAdded) { host.Chat.AddContext(context); contextAdded = true; }
-        host.Log("Reaction Memory: she remembers what she said on her own.");
-    }
-
-    public bool Heard(string words) { return false; }
-
-    public void Stop()
-    {
-        if (capri == null) return;
-        try { capri.Voice.Speaking -= speaking; } catch { }
-        // ClearContext drops every mod's context, not just this one, so this
-        // one stays registered and simply goes quiet.
-        lock (gate) said.Clear();
-        stopped = true;
-    }
-    bool stopped, contextAdded;
-
-    // Every line she says out loud passes through here. Chat replies are
-    // already in her conversation, so only her own lines are kept.
-    void OnSpeaking(CapriMessage m)
-    {
-        if (m == null || m.Cancel || string.IsNullOrWhiteSpace(m.Text)) return;
-        if (!sayReplies && string.Equals(m.Source, "reply", StringComparison.OrdinalIgnoreCase)) return;
-        if (string.Equals(m.Source, "you", StringComparison.OrdinalIgnoreCase)) return;
-        string text = m.Text.Trim();
-        lock (gate)
-        {
-            if (said.Count > 0 && said[said.Count - 1].Text == text) return;   // same line twice
-            said.Add(new Said { At = DateTime.Now, Source = m.Source ?? "", Text = text });
-        }
-        Trim();
-    }
-
-    void Trim() { lock (gate) while (said.Count > keep) said.RemoveAt(0); }
-
-    string Context()
-    {
-        if (stopped) return null;
-        StringBuilder b = new StringBuilder();
-        lock (gate)
-        {
-            foreach (Said s in said)
-            {
-                if (DateTime.Now - s.At > fresh) continue;
-                b.Append("- ").Append(s.At.ToString("HH:mm")).Append(' ');
-                if (s.Source.Length > 0) b.Append('(').Append(s.Source).Append(") ");
-                b.Append('"').Append(s.Text.Replace("\"", "'")).Append("\"\n");
-            }
-        }
-        if (b.Length == 0) return null;
-        return "Things you said out loud on your own in the last half hour, oldest first. "
-             + "These were your words, not the user's. If they reply to one, you know what they mean:\n" + b;
-    }
-}
-
-// ---- Options page (Quaisar_THM's shared toolkit) -------------------------------
-// An Options page under Mainframe > Mods, in her colours. Every value lives in
-// this mod's own Store, so it survives restarts and updates. Toggles and
-// numbers apply as you change them; text applies on Enter or when you click away.
-sealed class Opts
-{
-    static readonly Color Back = Color.FromArgb(16, 15, 8), Ink = Color.FromArgb(236, 236, 241),
-        Dim = Color.FromArgb(150, 146, 120), Yellow = Color.FromArgb(252, 239, 3),
-        Cyan = Color.FromArgb(5, 202, 237), Field = Color.FromArgb(30, 29, 14), Edge = Color.FromArgb(90, 86, 10);
-    const int Wide = 690, Right = 470;
-
-    delegate int Row(Control page, int y);
-    readonly ICapriHost host;
-    readonly List<Row> rows = new List<Row>();
-
-    public Opts(ICapriHost host, string title)
-    {
-        this.host = host;
-        host.Ui.SetOptions(title, Build);
-    }
-
-    // Reading values, with sane fallbacks for anything missing or out of range.
-    public bool Flag(string key, bool def) { try { return host.Store.Flag(key, def); } catch (Exception) { return def; } }
-    public double Num(string key, double def, double min, double max)
-    {
-        double v;
-        try { v = host.Store.Number(key, def); } catch (Exception) { v = def; }
-        return double.IsNaN(v) ? def : Math.Max(min, Math.Min(max, v));
-    }
-    public string Str(string key, string def)
-    {
-        try { string v = host.Store.Get(key, def); return v ?? def; } catch (Exception) { return def; }
-    }
-
-    public void Section(string title)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            System.Windows.Forms.Label l = Text(title.ToUpperInvariant(), 18, y + (y > 14 ? 10 : 0), Wide);
-            l.ForeColor = Cyan;
-            l.Font = new Font("Segoe UI Semibold", 9.5f);
-            p.Controls.Add(l);
-            return l.Bottom + 8;
-        });
-    }
-
-    public void Note(string text)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            System.Windows.Forms.Label l = Text(text, 18, y, Wide);
-            l.ForeColor = Dim;
-            l.Font = new Font("Segoe UI", 8.5f);
-            l.Height = TextRenderer.MeasureText(text, l.Font, new Size(Wide, 0), TextFormatFlags.WordBreak).Height + 4;
-            p.Controls.Add(l);
-            return l.Bottom + 8;
-        });
-    }
-
-    public void Toggle(string label, string key, bool def, Action<bool> changed)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
-            Button off = Pill("OFF", Right + 50, y), on = Pill("ON", Right + 140, y);
-            MethodInvoker paint = delegate
-            {
-                bool v = Flag(key, def);
-                Lit(on, v);
-                Lit(off, !v);
-            };
-            off.Click += delegate { Save(key, false); paint(); Tell(changed, false); };
-            on.Click += delegate { Save(key, true); paint(); Tell(changed, true); };
-            paint();
-            p.Controls.Add(off);
-            p.Controls.Add(on);
-            return y + 42;
-        });
-    }
-
-    public void Number(string label, string key, double def, double min, double max, double step, int decimals, Action<double> changed)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
-            NumericUpDown box = new NumericUpDown
-            {
-                Left = Right + 50, Top = y + 2, Width = 170, DecimalPlaces = decimals,
-                Minimum = (decimal)min, Maximum = (decimal)max, Increment = (decimal)step,
-                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 10f), TextAlign = HorizontalAlignment.Center,
-            };
-            box.Value = (decimal)Num(key, def, min, max);
-            box.ValueChanged += delegate
-            {
-                double v = (double)box.Value;
-                try { host.Store.Set(key, v); } catch (Exception) { }
-                Tell(changed, v);
-            };
-            p.Controls.Add(box);
-            return y + 42;
-        });
-    }
-
-    public void Text(string label, string key, string def, Action<string> changed)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            p.Controls.Add(Text(label, 18, y, Wide));
-            TextBox box = new TextBox
-            {
-                Left = 18, Top = y + 24, Width = Wide, Text = Str(key, def),
-                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 10f),
-            };
-            string applied = box.Text;
-            MethodInvoker apply = delegate
-            {
-                if (box.Text == applied) return;
-                applied = box.Text;
-                try { host.Store.Set(key, applied); } catch (Exception) { }
-                Tell(changed, applied);
-            };
-            box.Leave += delegate { apply(); };
-            box.KeyDown += delegate(object s, KeyEventArgs e)
-            {
-                if (e.KeyCode != Keys.Enter) return;
-                e.SuppressKeyPress = true;
-                apply();
-            };
-            p.Controls.Add(box);
-            return box.Bottom + 12;
-        });
-    }
-
-    Control Build()
-    {
-        Panel page = new Panel { Width = Wide + 36, BackColor = Back, ForeColor = Ink, Font = new Font("Segoe UI", 9.5f) };
-        int y = 14;
-        foreach (Row r in rows) y = r(page, y);
-        page.Height = y + 10;
-        return page;
-    }
-
-    void Save(string key, bool v) { try { host.Store.Set(key, v); } catch (Exception) { } }
-
-    // A setting that fails to apply is logged, never thrown into her window.
-    void Tell<T>(Action<T> changed, T value)
-    {
-        if (changed == null) return;
-        try { changed(value); }
-        catch (Exception e) { try { host.Log("Options: " + e.Message); } catch (Exception) { } }
-    }
-
-    static System.Windows.Forms.Label Text(string text, int x, int y, int width)
-    {
-        return new System.Windows.Forms.Label { Text = text, Left = x, Top = y, Width = width, AutoSize = false, Height = 22, ForeColor = Ink, BackColor = Color.Transparent };
-    }
-
-    static Button Pill(string text, int x, int y)
-    {
-        Button b = new Button { Text = text, Left = x, Top = y, Width = 84, Height = 30, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Default, Font = new Font("Segoe UI Semibold", 9f) };
-        b.FlatAppearance.BorderColor = Edge;
-        return b;
-    }
-
-    static void Lit(Button b, bool lit)
-    {
-        b.BackColor = lit ? Yellow : Field;
-        b.ForeColor = lit ? Back : Ink;
-        b.FlatAppearance.BorderColor = lit ? Yellow : Edge;
-    }
-
-    // "a, b ,c" -> ["a","b","c"], blanks dropped.
-    public static List<string> Words(string list)
-    {
-        List<string> words = new List<string>();
-        foreach (string w in (list ?? "").Split(','))
-            if (w.Trim().Length > 0) words.Add(w.Trim());
-        return words;
-    }
-}
+// capri-mod: 1
+// id: reaction-memory
+// name: Reaction Memory
+// version: 1.0.0
+// author: Quaisar_THM
+// description: She remembers what she just said out loud on her own (reactions, greetings, check-ins), so when you answer one of them she knows what you mean.
+// requires: api 3
+// permissions: voice,chat
+
+using System;
+using System.Collections.Generic;
+using System.Text;
+using CapriDesktop;
+using System.Drawing;
+using System.Windows.Forms;
+
+public class OwnLines : ICapriMod
+{
+    int keep = 12;                                       // lines remembered
+    TimeSpan fresh = TimeSpan.FromMinutes(30);
+    bool sayReplies = false;
+    Opts opts;
+
+    struct Said { public DateTime At; public string Source, Text; }
+
+    ICapriHost capri;
+    readonly List<Said> said = new List<Said>();
+    readonly object gate = new object();
+    Action<CapriMessage> speaking;
+    Func<string> context;
+
+    public void Start(ICapriHost host)
+    {
+        capri = host;
+        if (opts == null)
+        {
+            opts = new Opts(host, "Reaction Memory");
+            opts.Section("What she remembers");
+            opts.Number("Lines she remembers", "keep", 12, 1, 50, 1, 0, delegate(double v) { keep = (int)v; Trim(); });
+            opts.Number("Forget them after (minutes)", "minutes", 30, 1, 240, 5, 0, delegate(double v) { fresh = TimeSpan.FromMinutes(v); });
+            opts.Toggle("Also remember her chat replies (they're usually already in the chat)", "replies", false, delegate(bool v) { sayReplies = v; });
+            opts.Note("Her own lines are reactions, greetings, check-ins and idle chatter. These get added to every message you send her, so she knows what you're answering.");
+        }
+        keep = (int)opts.Num("keep", 12, 1, 50);
+        fresh = TimeSpan.FromMinutes(opts.Num("minutes", 30, 1, 240));
+        sayReplies = opts.Flag("replies", false);
+        stopped = false;
+        speaking = OnSpeaking;
+        context = Context;
+        host.Voice.Speaking += speaking;
+        if (!contextAdded) { host.Chat.AddContext(context); contextAdded = true; }
+        host.Log("Reaction Memory: she remembers what she said on her own.");
+    }
+
+    public bool Heard(string words) { return false; }
+
+    public void Stop()
+    {
+        if (capri == null) return;
+        try { capri.Voice.Speaking -= speaking; } catch { }
+        // ClearContext drops every mod's context, not just this one, so this
+        // one stays registered and simply goes quiet.
+        lock (gate) said.Clear();
+        stopped = true;
+    }
+    bool stopped, contextAdded;
+
+    // Every line she says out loud passes through here. Chat replies are
+    // already in her conversation, so only her own lines are kept.
+    void OnSpeaking(CapriMessage m)
+    {
+        if (m == null || m.Cancel || string.IsNullOrWhiteSpace(m.Text)) return;
+        if (!sayReplies && string.Equals(m.Source, "reply", StringComparison.OrdinalIgnoreCase)) return;
+        if (string.Equals(m.Source, "you", StringComparison.OrdinalIgnoreCase)) return;
+        string text = m.Text.Trim();
+        lock (gate)
+        {
+            if (said.Count > 0 && said[said.Count - 1].Text == text) return;   // same line twice
+            said.Add(new Said { At = DateTime.Now, Source = m.Source ?? "", Text = text });
+        }
+        Trim();
+    }
+
+    void Trim() { lock (gate) while (said.Count > keep) said.RemoveAt(0); }
+
+    string Context()
+    {
+        if (stopped) return null;
+        StringBuilder b = new StringBuilder();
+        lock (gate)
+        {
+            foreach (Said s in said)
+            {
+                if (DateTime.Now - s.At > fresh) continue;
+                b.Append("- ").Append(s.At.ToString("HH:mm")).Append(' ');
+                if (s.Source.Length > 0) b.Append('(').Append(s.Source).Append(") ");
+                b.Append('"').Append(s.Text.Replace("\"", "'")).Append("\"\n");
+            }
+        }
+        if (b.Length == 0) return null;
+        return "Things you said out loud on your own in the last half hour, oldest first. "
+             + "These were your words, not the user's. If they reply to one, you know what they mean:\n" + b;
+    }
+}
+
+// ---- Options page (Quaisar_THM's shared toolkit) -------------------------------
+// An Options page under Mainframe > Mods, in her colours. Every value lives in
+// this mod's own Store, so it survives restarts and updates. Toggles and
+// numbers apply as you change them; text applies on Enter or when you click away.
+sealed class Opts
+{
+    static readonly Color Back = Color.FromArgb(16, 15, 8), Ink = Color.FromArgb(236, 236, 241),
+        Dim = Color.FromArgb(150, 146, 120), Yellow = Color.FromArgb(252, 239, 3),
+        Cyan = Color.FromArgb(5, 202, 237), Field = Color.FromArgb(30, 29, 14), Edge = Color.FromArgb(90, 86, 10);
+    const int Wide = 690, Right = 470;
+
+    delegate int Row(Control page, int y);
+    readonly ICapriHost host;
+    readonly List<Row> rows = new List<Row>();
+
+    public Opts(ICapriHost host, string title)
+    {
+        this.host = host;
+        host.Ui.SetOptions(title, Build);
+    }
+
+    // Reading values, with sane fallbacks for anything missing or out of range.
+    public bool Flag(string key, bool def) { try { return host.Store.Flag(key, def); } catch (Exception) { return def; } }
+    public double Num(string key, double def, double min, double max)
+    {
+        double v;
+        try { v = host.Store.Number(key, def); } catch (Exception) { v = def; }
+        return double.IsNaN(v) ? def : Math.Max(min, Math.Min(max, v));
+    }
+    public string Str(string key, string def)
+    {
+        try { string v = host.Store.Get(key, def); return v ?? def; } catch (Exception) { return def; }
+    }
+
+    public void Section(string title)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            System.Windows.Forms.Label l = Text(title.ToUpperInvariant(), 18, y + (y > 14 ? 10 : 0), Wide);
+            l.ForeColor = Cyan;
+            l.Font = new Font("Segoe UI Semibold", 9.5f);
+            p.Controls.Add(l);
+            return l.Bottom + 8;
+        });
+    }
+
+    public void Note(string text)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            System.Windows.Forms.Label l = Text(text, 18, y, Wide);
+            l.ForeColor = Dim;
+            l.Font = new Font("Segoe UI", 8.5f);
+            l.Height = TextRenderer.MeasureText(text, l.Font, new Size(Wide, 0), TextFormatFlags.WordBreak).Height + 4;
+            p.Controls.Add(l);
+            return l.Bottom + 8;
+        });
+    }
+
+    public void Toggle(string label, string key, bool def, Action<bool> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
+            Button off = Pill("OFF", Right + 50, y), on = Pill("ON", Right + 140, y);
+            MethodInvoker paint = delegate
+            {
+                bool v = Flag(key, def);
+                Lit(on, v);
+                Lit(off, !v);
+            };
+            off.Click += delegate { Save(key, false); paint(); Tell(changed, false); };
+            on.Click += delegate { Save(key, true); paint(); Tell(changed, true); };
+            paint();
+            p.Controls.Add(off);
+            p.Controls.Add(on);
+            return y + 42;
+        });
+    }
+
+    public void Number(string label, string key, double def, double min, double max, double step, int decimals, Action<double> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
+            NumericUpDown box = new NumericUpDown
+            {
+                Left = Right + 50, Top = y + 2, Width = 170, DecimalPlaces = decimals,
+                Minimum = (decimal)min, Maximum = (decimal)max, Increment = (decimal)step,
+                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f), TextAlign = HorizontalAlignment.Center,
+            };
+            box.Value = (decimal)Num(key, def, min, max);
+            box.ValueChanged += delegate
+            {
+                double v = (double)box.Value;
+                try { host.Store.Set(key, v); } catch (Exception) { }
+                Tell(changed, v);
+            };
+            p.Controls.Add(box);
+            return y + 42;
+        });
+    }
+
+    public void Text(string label, string key, string def, Action<string> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y, Wide));
+            TextBox box = new TextBox
+            {
+                Left = 18, Top = y + 24, Width = Wide, Text = Str(key, def),
+                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f),
+            };
+            string applied = box.Text;
+            MethodInvoker apply = delegate
+            {
+                if (box.Text == applied) return;
+                applied = box.Text;
+                try { host.Store.Set(key, applied); } catch (Exception) { }
+                Tell(changed, applied);
+            };
+            box.Leave += delegate { apply(); };
+            box.KeyDown += delegate(object s, KeyEventArgs e)
+            {
+                if (e.KeyCode != Keys.Enter) return;
+                e.SuppressKeyPress = true;
+                apply();
+            };
+            p.Controls.Add(box);
+            return box.Bottom + 12;
+        });
+    }
+
+    Control Build()
+    {
+        Panel page = new Panel { Width = Wide + 36, BackColor = Back, ForeColor = Ink, Font = new Font("Segoe UI", 9.5f) };
+        int y = 14;
+        foreach (Row r in rows) y = r(page, y);
+        page.Height = y + 10;
+        return page;
+    }
+
+    void Save(string key, bool v) { try { host.Store.Set(key, v); } catch (Exception) { } }
+
+    // A setting that fails to apply is logged, never thrown into her window.
+    void Tell<T>(Action<T> changed, T value)
+    {
+        if (changed == null) return;
+        try { changed(value); }
+        catch (Exception e) { try { host.Log("Options: " + e.Message); } catch (Exception) { } }
+    }
+
+    static System.Windows.Forms.Label Text(string text, int x, int y, int width)
+    {
+        return new System.Windows.Forms.Label { Text = text, Left = x, Top = y, Width = width, AutoSize = false, Height = 22, ForeColor = Ink, BackColor = Color.Transparent };
+    }
+
+    static Button Pill(string text, int x, int y)
+    {
+        Button b = new Button { Text = text, Left = x, Top = y, Width = 84, Height = 30, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Default, Font = new Font("Segoe UI Semibold", 9f) };
+        b.FlatAppearance.BorderColor = Edge;
+        return b;
+    }
+
+    static void Lit(Button b, bool lit)
+    {
+        b.BackColor = lit ? Yellow : Field;
+        b.ForeColor = lit ? Back : Ink;
+        b.FlatAppearance.BorderColor = lit ? Yellow : Edge;
+    }
+
+    // "a, b ,c" -> ["a","b","c"], blanks dropped.
+    public static List<string> Words(string list)
+    {
+        List<string> words = new List<string>();
+        foreach (string w in (list ?? "").Split(','))
+            if (w.Trim().Length > 0) words.Add(w.Trim());
+        return words;
+    }
+}
