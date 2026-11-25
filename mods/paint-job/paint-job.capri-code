@@ -1,477 +1,483 @@
-// capri-mod: 1
-// id: paint-job
-// name: Paint Job
-// version: 1.0.0
-// author: Quaisar_THM
-// description: Repaints her Night City Mainframe, speech bubble, HUD portrait, own computer and file editor in any two colours you pick. Every shade follows by hue.
-// requires: api 3
-
-using System;
-using System.Collections.Generic;
-using System.Reflection;
-using System.Reflection.Emit;
-using CapriDesktop;
-using System.Drawing;
-using System.Windows.Forms;
-
-public class HerColorsUi : ICapriMod
-{
-    const BindingFlags Any = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-    const int NightCity = 0;
-
-    // Night City's 26 Mainframe colours, in Capri's own order. Her yellows
-    // replace the reds; her cyans replace the teals; backgrounds stay dark
-    // so yellow text keeps its contrast.
-    static readonly int[][] Theme = {
-        new[] { 10, 10,  8},  // Ground    window background
-        new[] { 52, 48,  6},  // Glow      soft glow behind headers
-        new[] { 16, 15,  8},  // Band      section bands
-        new[] {  5,130,152},  // Rule      divider lines
-        new[] {252,239,  3},  // Rose      highlighted text (her hair)
-        new[] {236,236,241},  // White     body text
-        new[] {150,146,120},  // Faint     hints
-        new[] { 18, 18, 12},  // Field     input boxes
-        new[] { 34, 32, 10},  // Hover
-        new[] { 52, 48,  8},  // Pressed
-        new[] {110,104, 10},  // Edge      borders
-        new[] {255,255,  0},  // Hot       main accent (her body)
-        new[] {  0,255,255},  // Cyan      (her edges)
-        new[] {  0, 32, 38},  // Deep
-        new[] {  5,150,175},  // DeepEdge
-        new[] { 12, 12,  6},  // OnInk     text on bright buttons
-        new[] { 90, 86, 10},  // Dash
-        new[] {242,255,  9},  // Lit       (her eyes)
-        new[] {140,132,  8},  // Brim
-        new[] { 12, 12,  8},  // Well
-        new[] { 84, 80, 10},  // WellEdge
-        new[] {  5,202,237},  // Amber     (her accent)
-        new[] {  9, 11, 15},  // Sheet     notes page
-        new[] {232,236,240},  // SheetInk
-        new[] {122,128,138},  // SheetDim
-        new[] { 16, 15,  8},  // MenuBack  right-click menu
-    };
-
-    // Fixed colours elsewhere, as "Class.Field". A field a later Capri
-    // renames or removes is just skipped.
-    static readonly Dictionary<string, int[]> Bubble = new Dictionary<string, int[]> {
-        // Her speech bubble and small widgets.
-        { "Look.Cyan",   new[] {  5,202,237} },   // her accent
-        { "Look.Neon",   new[] {  0,255,255} },   // her edges
-        { "Look.Red",    new[] {255,255,  0} },   // her body
-        { "Look.Pink",   new[] {252,239,  3} },   // her hair
-        { "Look.Yellow", new[] {252,239,  3} },
-        // 0.9.4: her HUD portrait.
-        { "HudPaint.Skin",     new[] {255,255,  0} },
-        { "HudPaint.Hair",     new[] {252,239,  3} },
-        { "HudPaint.IrisDeep", new[] {  0, 60, 80} },
-        { "HudPaint.Iris",     new[] {  5,202,237} },
-        { "HudPaint.IrisLit",  new[] {  0,255,255} },
-        { "HudPaint.Fringe",   new[] {  0,255,255} },
-        // 0.9.4: her own little computer window, plum and rose -> dark and yellow.
-        { "HerComputerWindow.Ground",    new[] { 10, 10,  8} },
-        { "HerComputerWindow.Plum",      new[] { 20, 19,  8} },
-        { "HerComputerWindow.Chrome",    new[] { 40, 38,  8} },
-        { "HerComputerWindow.Rose",      new[] {252,239,  3} },
-        { "HerComputerWindow.Blush",     new[] {255,250,200} },
-        { "HerComputerWindow.Faded",     new[] {170,165,120} },
-        { "HerComputerWindow.Ink",       new[] { 40, 38, 10} },
-        { "HerComputerWindow.SoftInk",   new[] {150,146,120} },
-        { "HerComputerWindow.Paper",     new[] {255,254,240} },
-        { "HerComputerWindow.PaperHead", new[] {255,250,200} },
-        { "HerComputerWindow.Hot",       new[] {  5,150,175} },   // on light paper: cyan reads, yellow wouldn't
-        // 0.9.6: her file editor (red paper, black ink -> her yellow paper) and panel art.
-        { "FileEditor.Red",    new[] {252,239,  3} },
-        { "FileEditor.Paper",  new[] {252,239,  3} },
-        { "FileEditor.Salmon", new[] {255,250,140} },
-        { "FileEditor.Dark",   new[] { 20, 19,  8} },
-        { "PanelArt.Glass",    new[] { 40, 38, 10} },
-        { "PanelArt.Spine",    new[] {252,239,  3} },
-        { "PanelArt.Rule",     new[] {  5,202,237} },
-    };
-
-    ICapriHost capri;
-    Opts opts;
-    const string DefaultYellow = "#FCEF03", DefaultCyan = "#05CAED";
-    // Which option each fixed-colour class belongs to.
-    static readonly Dictionary<string, string> Area = new Dictionary<string, string> {
-        { "Look", "bubble" }, { "HudPaint", "hud" }, { "HerComputerWindow", "computer" },
-        { "FileEditor", "editor" }, { "PanelArt", "editor" },
-    };
-    double yellowHue = -1, cyanHue = -1;   // -1: keep the built-in hue
-    Type neon, colorType;
-    MethodInfo fromArgb;
-    object originalTheme;
-    readonly Dictionary<FieldInfo, object> originalBubble = new Dictionary<FieldInfo, object>();
-
-    public void Start(ICapriHost host)
-    {
-        capri = host;
-        if (opts == null)
-        {
-            opts = new Opts(host, "Paint Job");
-            Action<bool> again = delegate(bool v) { Reapply(); };
-            Action<string> againText = delegate(string v) { Reapply(); };
-            opts.Section("Where her colours go");
-            opts.Toggle("Mainframe (pick Night City under Mainframe colours)", "mainframe", true, again);
-            opts.Toggle("Her speech bubble and small widgets", "bubble", true, again);
-            opts.Toggle("Her HUD portrait", "hud", true, again);
-            opts.Toggle("Her own computer window", "computer", true, again);
-            opts.Toggle("Her file editor and panel art", "editor", true, again);
-            opts.Section("Her colours");
-            opts.Text("Main colour, as hex (her yellow is " + DefaultYellow + ")", "yellow", DefaultYellow, againText);
-            opts.Text("Accent colour, as hex (her cyan is " + DefaultCyan + ")", "cyan", DefaultCyan, againText);
-            opts.Note("Every shade of her yellow follows the main colour and every shade of cyan follows the accent, each keeping its own brightness, so dark glows and borders change too. Turning the mod off puts Capri's originals back.");
-        }
-        Apply();
-    }
-
-    void Reapply()
-    {
-        Stop();
-        Apply();
-    }
-
-    void Apply()
-    {
-        yellowHue = HueOf(opts.Str("yellow", DefaultYellow), DefaultYellow);
-        cyanHue = HueOf(opts.Str("cyan", DefaultCyan), DefaultCyan);
-        try
-        {
-            Assembly app = typeof(ICapriHost).Assembly;
-            neon = app.GetType("CapriDesktop.Neon", true);
-
-            Array looks = (Array)neon.GetField("Looks", Any).GetValue(null);
-            Array night = (Array)looks.GetValue(NightCity);
-            colorType = night.GetType().GetElementType();
-            fromArgb = colorType.GetMethod("FromArgb", new[] { typeof(int), typeof(int), typeof(int) });
-
-            // Mainframe: a fresh list, so Repaint can map old colours to new.
-            if (opts.Flag("mainframe", true))
-            {
-                Array fresh = (Array)night.Clone();
-                for (int i = 0; i < Theme.Length && i < fresh.Length; i++)
-                    fresh.SetValue(Make(Theme[i]), i);
-                originalTheme = night;
-                looks.SetValue(fresh, NightCity);
-                RepaintIfShowing(night);
-            }
-
-            // These are static readonly, so write them directly.
-            foreach (KeyValuePair<string, int[]> kv in Bubble)
-            {
-                string[] name = kv.Key.Split('.');
-                string area;
-                if (Area.TryGetValue(name[0], out area) && !opts.Flag(area, true)) continue;
-                Type owner = app.GetType("CapriDesktop." + name[0], false);
-                FieldInfo f = owner == null ? null : owner.GetField(name[1], Any);
-                if (f == null || f.FieldType != colorType) continue;
-                originalBubble[f] = f.GetValue(null);
-                Write(f, Make(kv.Value));
-            }
-            capri.Log("Paint Job: Night City and her bubble now use her colours.");
-        }
-        catch (Exception e)
-        {
-            capri.Log("Paint Job could not start: " + e.Message);
-            Stop();
-        }
-    }
-
-    public bool Heard(string words) { return false; }
-
-    public void Stop()
-    {
-        try
-        {
-            if (neon != null && originalTheme != null)
-            {
-                Array looks = (Array)neon.GetField("Looks", Any).GetValue(null);
-                Array mine = (Array)looks.GetValue(NightCity);
-                looks.SetValue(originalTheme, NightCity);
-                RepaintIfShowing(mine);
-                originalTheme = null;
-            }
-            foreach (KeyValuePair<FieldInfo, object> kv in originalBubble) Write(kv.Key, kv.Value);
-            originalBubble.Clear();
-        }
-        catch (Exception e)
-        {
-            if (capri != null) capri.Log("Paint Job could not restore colours: " + e.Message);
-        }
-    }
-
-    object Make(int[] rgb)
-    {
-        int[] c = Shift(rgb);
-        return fromArgb.Invoke(null, new object[] { c[0], c[1], c[2] });
-    }
-
-    // Her yellows sit near hue 56 and her cyans near 189. Anything in those
-    // families takes the chosen hue and keeps its own saturation and lightness.
-    int[] Shift(int[] rgb)
-    {
-        double h, sat, l;
-        ToHsl(rgb, out h, out sat, out l);
-        if (sat < 0.15) return rgb;                                   // greys and near-whites stay
-        double to = -1;
-        if (yellowHue >= 0 && Near(h, 56, 22)) to = yellowHue;
-        else if (cyanHue >= 0 && Near(h, 189, 22)) to = cyanHue;
-        return to < 0 ? rgb : FromHsl(to, sat, l);
-    }
-
-    static bool Near(double h, double centre, double width)
-    {
-        double d = Math.Abs(h - centre) % 360;
-        return Math.Min(d, 360 - d) <= width;
-    }
-
-    // "#FF2E88" -> its hue; -1 when it's her default (no shift) or can't be read.
-    static double HueOf(string hex, string def)
-    {
-        hex = (hex ?? "").Trim().TrimStart('#');
-        if (hex.Length != 6 || string.Equals(hex, def.TrimStart('#'), StringComparison.OrdinalIgnoreCase)) return -1;
-        int v;
-        if (!int.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out v)) return -1;
-        double h, sat, l;
-        ToHsl(new[] { (v >> 16) & 255, (v >> 8) & 255, v & 255 }, out h, out sat, out l);
-        return h;
-    }
-
-    static void ToHsl(int[] c, out double h, out double s, out double l)
-    {
-        double r = c[0] / 255.0, g = c[1] / 255.0, b = c[2] / 255.0;
-        double max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b));
-        l = (max + min) / 2;
-        double d = max - min;
-        if (d < 1e-9) { h = 0; s = 0; return; }
-        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-        if (max == r) h = (g - b) / d + (g < b ? 6 : 0);
-        else if (max == g) h = (b - r) / d + 2;
-        else h = (r - g) / d + 4;
-        h *= 60;
-    }
-
-    static int[] FromHsl(double h, double s, double l)
-    {
-        double q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
-        return new[] { Channel(p, q, h / 360 + 1.0 / 3), Channel(p, q, h / 360), Channel(p, q, h / 360 - 1.0 / 3) };
-    }
-
-    static int Channel(double p, double q, double t)
-    {
-        if (t < 0) t += 1;
-        if (t > 1) t -= 1;
-        double v = t < 1.0 / 6 ? p + (q - p) * 6 * t : t < 0.5 ? q : t < 2.0 / 3 ? p + (q - p) * (2.0 / 3 - t) * 6 : p;
-        return (int)Math.Round(Math.Max(0, Math.Min(1, v)) * 255);
-    }
-
-    // If Night City is the theme on screen, run Capri's own theme switch so
-    // every open window swaps the old colours for the new ones.
-    void RepaintIfShowing(Array previous)
-    {
-        if (!ReferenceEquals(neon.GetField("now", Any).GetValue(null), previous)) return;
-        MethodInfo repaint = neon.GetMethod("Repaint", Any);
-        if (repaint == null) return;
-        ParameterInfo[] ps = repaint.GetParameters();
-        object extra = ps.Length > 1 && ps[1].ParameterType.IsArray
-            ? Array.CreateInstance(ps[1].ParameterType.GetElementType(), 0) : null;
-        repaint.Invoke(null, ps.Length > 1 ? new object[] { NightCity, extra } : new object[] { NightCity });
-    }
-
-    // stsfld from a dynamic method: the one way to change a static readonly
-    // field after its class has been set up.
-    static void Write(FieldInfo field, object value)
-    {
-        DynamicMethod dm = new DynamicMethod("set_" + field.Name, null, new[] { typeof(object) },
-                                             field.DeclaringType.Module, true);
-        ILGenerator il = dm.GetILGenerator();
-        il.Emit(OpCodes.Ldarg_0);
-        il.Emit(OpCodes.Unbox_Any, field.FieldType);
-        il.Emit(OpCodes.Stsfld, field);
-        il.Emit(OpCodes.Ret);
-        ((Action<object>)dm.CreateDelegate(typeof(Action<object>)))(value);
-    }
-}
-
-// ---- Options page (Quaisar_THM's shared toolkit) -------------------------------
-// An Options page under Mainframe > Mods, in her colours. Every value lives in
-// this mod's own Store, so it survives restarts and updates. Toggles and
-// numbers apply as you change them; text applies on Enter or when you click away.
-sealed class Opts
-{
-    static readonly Color Back = Color.FromArgb(16, 15, 8), Ink = Color.FromArgb(236, 236, 241),
-        Dim = Color.FromArgb(150, 146, 120), Yellow = Color.FromArgb(252, 239, 3),
-        Cyan = Color.FromArgb(5, 202, 237), Field = Color.FromArgb(30, 29, 14), Edge = Color.FromArgb(90, 86, 10);
-    const int Wide = 690, Right = 470;
-
-    delegate int Row(Control page, int y);
-    readonly ICapriHost host;
-    readonly List<Row> rows = new List<Row>();
-
-    public Opts(ICapriHost host, string title)
-    {
-        this.host = host;
-        host.Ui.SetOptions(title, Build);
-    }
-
-    // Reading values, with sane fallbacks for anything missing or out of range.
-    public bool Flag(string key, bool def) { try { return host.Store.Flag(key, def); } catch (Exception) { return def; } }
-    public double Num(string key, double def, double min, double max)
-    {
-        double v;
-        try { v = host.Store.Number(key, def); } catch (Exception) { v = def; }
-        return double.IsNaN(v) ? def : Math.Max(min, Math.Min(max, v));
-    }
-    public string Str(string key, string def)
-    {
-        try { string v = host.Store.Get(key, def); return v ?? def; } catch (Exception) { return def; }
-    }
-
-    public void Section(string title)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            System.Windows.Forms.Label l = Text(title.ToUpperInvariant(), 18, y + (y > 14 ? 10 : 0), Wide);
-            l.ForeColor = Cyan;
-            l.Font = new Font("Segoe UI Semibold", 9.5f);
-            p.Controls.Add(l);
-            return l.Bottom + 8;
-        });
-    }
-
-    public void Note(string text)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            System.Windows.Forms.Label l = Text(text, 18, y, Wide);
-            l.ForeColor = Dim;
-            l.Font = new Font("Segoe UI", 8.5f);
-            l.Height = TextRenderer.MeasureText(text, l.Font, new Size(Wide, 0), TextFormatFlags.WordBreak).Height + 4;
-            p.Controls.Add(l);
-            return l.Bottom + 8;
-        });
-    }
-
-    public void Toggle(string label, string key, bool def, Action<bool> changed)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
-            Button off = Pill("OFF", Right + 50, y), on = Pill("ON", Right + 140, y);
-            MethodInvoker paint = delegate
-            {
-                bool v = Flag(key, def);
-                Lit(on, v);
-                Lit(off, !v);
-            };
-            off.Click += delegate { Save(key, false); paint(); Tell(changed, false); };
-            on.Click += delegate { Save(key, true); paint(); Tell(changed, true); };
-            paint();
-            p.Controls.Add(off);
-            p.Controls.Add(on);
-            return y + 42;
-        });
-    }
-
-    public void Number(string label, string key, double def, double min, double max, double step, int decimals, Action<double> changed)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
-            NumericUpDown box = new NumericUpDown
-            {
-                Left = Right + 50, Top = y + 2, Width = 170, DecimalPlaces = decimals,
-                Minimum = (decimal)min, Maximum = (decimal)max, Increment = (decimal)step,
-                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 10f), TextAlign = HorizontalAlignment.Center,
-            };
-            box.Value = (decimal)Num(key, def, min, max);
-            box.ValueChanged += delegate
-            {
-                double v = (double)box.Value;
-                try { host.Store.Set(key, v); } catch (Exception) { }
-                Tell(changed, v);
-            };
-            p.Controls.Add(box);
-            return y + 42;
-        });
-    }
-
-    public void Text(string label, string key, string def, Action<string> changed)
-    {
-        rows.Add(delegate(Control p, int y)
-        {
-            p.Controls.Add(Text(label, 18, y, Wide));
-            TextBox box = new TextBox
-            {
-                Left = 18, Top = y + 24, Width = Wide, Text = Str(key, def),
-                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 10f),
-            };
-            string applied = box.Text;
-            MethodInvoker apply = delegate
-            {
-                if (box.Text == applied) return;
-                applied = box.Text;
-                try { host.Store.Set(key, applied); } catch (Exception) { }
-                Tell(changed, applied);
-            };
-            box.Leave += delegate { apply(); };
-            box.KeyDown += delegate(object s, KeyEventArgs e)
-            {
-                if (e.KeyCode != Keys.Enter) return;
-                e.SuppressKeyPress = true;
-                apply();
-            };
-            p.Controls.Add(box);
-            return box.Bottom + 12;
-        });
-    }
-
-    Control Build()
-    {
-        Panel page = new Panel { Width = Wide + 36, BackColor = Back, ForeColor = Ink, Font = new Font("Segoe UI", 9.5f) };
-        int y = 14;
-        foreach (Row r in rows) y = r(page, y);
-        page.Height = y + 10;
-        return page;
-    }
-
-    void Save(string key, bool v) { try { host.Store.Set(key, v); } catch (Exception) { } }
-
-    // A setting that fails to apply is logged, never thrown into her window.
-    void Tell<T>(Action<T> changed, T value)
-    {
-        if (changed == null) return;
-        try { changed(value); }
-        catch (Exception e) { try { host.Log("Options: " + e.Message); } catch (Exception) { } }
-    }
-
-    static System.Windows.Forms.Label Text(string text, int x, int y, int width)
-    {
-        return new System.Windows.Forms.Label { Text = text, Left = x, Top = y, Width = width, AutoSize = false, Height = 22, ForeColor = Ink, BackColor = Color.Transparent };
-    }
-
-    static Button Pill(string text, int x, int y)
-    {
-        Button b = new Button { Text = text, Left = x, Top = y, Width = 84, Height = 30, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Default, Font = new Font("Segoe UI Semibold", 9f) };
-        b.FlatAppearance.BorderColor = Edge;
-        return b;
-    }
-
-    static void Lit(Button b, bool lit)
-    {
-        b.BackColor = lit ? Yellow : Field;
-        b.ForeColor = lit ? Back : Ink;
-        b.FlatAppearance.BorderColor = lit ? Yellow : Edge;
-    }
-
-    // "a, b ,c" -> ["a","b","c"], blanks dropped.
-    public static List<string> Words(string list)
-    {
-        List<string> words = new List<string>();
-        foreach (string w in (list ?? "").Split(','))
-            if (w.Trim().Length > 0) words.Add(w.Trim());
-        return words;
-    }
-}
+// capri-mod: 1
+// id: paint-job
+// name: Paint Job
+// version: 1.0.1
+// author: Quaisar_THM
+// description: Repaints her Night City Mainframe, speech bubble, HUD portrait, own computer and file editor in any two colours you pick. Every shade follows by hue.
+// requires: api 3
+
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Reflection.Emit;
+using CapriDesktop;
+using System.Drawing;
+using System.Windows.Forms;
+
+public class HerColorsUi : ICapriMod
+{
+    const BindingFlags Any = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+    const int NightCity = 0;
+
+    // Night City's Mainframe colours (26, and 30 from 0.9.8), in Capri's own order. Her yellows
+    // replace the reds; her cyans replace the teals; backgrounds stay dark
+    // so yellow text keeps its contrast.
+    static readonly int[][] Theme = {
+        new[] { 10, 10,  8},  // Ground    window background
+        new[] { 52, 48,  6},  // Glow      soft glow behind headers
+        new[] { 16, 15,  8},  // Band      section bands
+        new[] {  5,130,152},  // Rule      divider lines
+        new[] {252,239,  3},  // Rose      highlighted text (her hair)
+        new[] {236,236,241},  // White     body text
+        new[] {150,146,120},  // Faint     hints
+        new[] { 18, 18, 12},  // Field     input boxes
+        new[] { 34, 32, 10},  // Hover
+        new[] { 52, 48,  8},  // Pressed
+        new[] {110,104, 10},  // Edge      borders
+        new[] {255,255,  0},  // Hot       main accent (her body)
+        new[] {  0,255,255},  // Cyan      (her edges)
+        new[] {  0, 32, 38},  // Deep
+        new[] {  5,150,175},  // DeepEdge
+        new[] { 12, 12,  6},  // OnInk     text on bright buttons
+        new[] { 90, 86, 10},  // Dash
+        new[] {242,255,  9},  // Lit       (her eyes)
+        new[] {140,132,  8},  // Brim
+        new[] { 12, 12,  8},  // Well
+        new[] { 84, 80, 10},  // WellEdge
+        new[] {  5,202,237},  // Amber     (her accent)
+        new[] {  9, 11, 15},  // Sheet     notes page
+        new[] {232,236,240},  // SheetInk
+        new[] {122,128,138},  // SheetDim
+        new[] { 16, 15,  8},  // MenuBack  right-click menu
+        // 0.9.8 moved her Look colours into the theme: the TYPE/TALK pill, her
+        // name on the bubble and her small widgets now read these four.
+        new[] {  5,202,237},  // Cyan      (her accent)
+        new[] {255,255,  0},  // Red       (her body)
+        new[] {  0,255,255},  // Neon      (her edges)
+        new[] {252,239,  3},  // Pink      (her hair)
+    };
+
+    // Fixed colours elsewhere, as "Class.Field". A field a later Capri
+    // renames or removes is just skipped.
+    static readonly Dictionary<string, int[]> Bubble = new Dictionary<string, int[]> {
+        // Her speech bubble and small widgets.
+        { "Look.Cyan",   new[] {  5,202,237} },   // her accent
+        { "Look.Neon",   new[] {  0,255,255} },   // her edges
+        { "Look.Red",    new[] {255,255,  0} },   // her body
+        { "Look.Pink",   new[] {252,239,  3} },   // her hair
+        { "Look.Yellow", new[] {252,239,  3} },
+        // 0.9.4: her HUD portrait.
+        { "HudPaint.Skin",     new[] {255,255,  0} },
+        { "HudPaint.Hair",     new[] {252,239,  3} },
+        { "HudPaint.IrisDeep", new[] {  0, 60, 80} },
+        { "HudPaint.Iris",     new[] {  5,202,237} },
+        { "HudPaint.IrisLit",  new[] {  0,255,255} },
+        { "HudPaint.Fringe",   new[] {  0,255,255} },
+        // 0.9.4: her own little computer window, plum and rose -> dark and yellow.
+        { "HerComputerWindow.Ground",    new[] { 10, 10,  8} },
+        { "HerComputerWindow.Plum",      new[] { 20, 19,  8} },
+        { "HerComputerWindow.Chrome",    new[] { 40, 38,  8} },
+        { "HerComputerWindow.Rose",      new[] {252,239,  3} },
+        { "HerComputerWindow.Blush",     new[] {255,250,200} },
+        { "HerComputerWindow.Faded",     new[] {170,165,120} },
+        { "HerComputerWindow.Ink",       new[] { 40, 38, 10} },
+        { "HerComputerWindow.SoftInk",   new[] {150,146,120} },
+        { "HerComputerWindow.Paper",     new[] {255,254,240} },
+        { "HerComputerWindow.PaperHead", new[] {255,250,200} },
+        { "HerComputerWindow.Hot",       new[] {  5,150,175} },   // on light paper: cyan reads, yellow wouldn't
+        // 0.9.6: her file editor (red paper, black ink -> her yellow paper) and panel art.
+        { "FileEditor.Red",    new[] {252,239,  3} },
+        { "FileEditor.Paper",  new[] {252,239,  3} },
+        { "FileEditor.Salmon", new[] {255,250,140} },
+        { "FileEditor.Dark",   new[] { 20, 19,  8} },
+        { "PanelArt.Glass",    new[] { 40, 38, 10} },
+        { "PanelArt.Spine",    new[] {252,239,  3} },
+        { "PanelArt.Rule",     new[] {  5,202,237} },
+    };
+
+    ICapriHost capri;
+    Opts opts;
+    const string DefaultYellow = "#FCEF03", DefaultCyan = "#05CAED";
+    // Which option each fixed-colour class belongs to.
+    static readonly Dictionary<string, string> Area = new Dictionary<string, string> {
+        { "Look", "bubble" }, { "HudPaint", "hud" }, { "HerComputerWindow", "computer" },
+        { "FileEditor", "editor" }, { "PanelArt", "editor" },
+    };
+    double yellowHue = -1, cyanHue = -1;   // -1: keep the built-in hue
+    Type neon, colorType;
+    MethodInfo fromArgb;
+    object originalTheme;
+    readonly Dictionary<FieldInfo, object> originalBubble = new Dictionary<FieldInfo, object>();
+
+    public void Start(ICapriHost host)
+    {
+        capri = host;
+        if (opts == null)
+        {
+            opts = new Opts(host, "Paint Job");
+            Action<bool> again = delegate(bool v) { Reapply(); };
+            Action<string> againText = delegate(string v) { Reapply(); };
+            opts.Section("Where her colours go");
+            opts.Toggle("Mainframe (pick Night City under Mainframe colours)", "mainframe", true, again);
+            opts.Toggle("Her speech bubble and small widgets", "bubble", true, again);
+            opts.Toggle("Her HUD portrait", "hud", true, again);
+            opts.Toggle("Her own computer window", "computer", true, again);
+            opts.Toggle("Her file editor and panel art", "editor", true, again);
+            opts.Section("Her colours");
+            opts.Text("Main colour, as hex (her yellow is " + DefaultYellow + ")", "yellow", DefaultYellow, againText);
+            opts.Text("Accent colour, as hex (her cyan is " + DefaultCyan + ")", "cyan", DefaultCyan, againText);
+            opts.Note("Every shade of her yellow follows the main colour and every shade of cyan follows the accent, each keeping its own brightness, so dark glows and borders change too. Turning the mod off puts Capri's originals back.");
+        }
+        Apply();
+    }
+
+    void Reapply()
+    {
+        Stop();
+        Apply();
+    }
+
+    void Apply()
+    {
+        yellowHue = HueOf(opts.Str("yellow", DefaultYellow), DefaultYellow);
+        cyanHue = HueOf(opts.Str("cyan", DefaultCyan), DefaultCyan);
+        try
+        {
+            Assembly app = typeof(ICapriHost).Assembly;
+            neon = app.GetType("CapriDesktop.Neon", true);
+
+            Array looks = (Array)neon.GetField("Looks", Any).GetValue(null);
+            Array night = (Array)looks.GetValue(NightCity);
+            colorType = night.GetType().GetElementType();
+            fromArgb = colorType.GetMethod("FromArgb", new[] { typeof(int), typeof(int), typeof(int) });
+
+            // Mainframe: a fresh list, so Repaint can map old colours to new.
+            if (opts.Flag("mainframe", true))
+            {
+                Array fresh = (Array)night.Clone();
+                for (int i = 0; i < Theme.Length && i < fresh.Length; i++)
+                    fresh.SetValue(Make(Theme[i]), i);
+                originalTheme = night;
+                looks.SetValue(fresh, NightCity);
+                RepaintIfShowing(night);
+            }
+
+            // These are static readonly, so write them directly.
+            foreach (KeyValuePair<string, int[]> kv in Bubble)
+            {
+                string[] name = kv.Key.Split('.');
+                string area;
+                if (Area.TryGetValue(name[0], out area) && !opts.Flag(area, true)) continue;
+                Type owner = app.GetType("CapriDesktop." + name[0], false);
+                FieldInfo f = owner == null ? null : owner.GetField(name[1], Any);
+                if (f == null || f.FieldType != colorType) continue;
+                originalBubble[f] = f.GetValue(null);
+                Write(f, Make(kv.Value));
+            }
+            capri.Log("Paint Job: Night City and her bubble now use her colours.");
+        }
+        catch (Exception e)
+        {
+            capri.Log("Paint Job could not start: " + e.Message);
+            Stop();
+        }
+    }
+
+    public bool Heard(string words) { return false; }
+
+    public void Stop()
+    {
+        try
+        {
+            if (neon != null && originalTheme != null)
+            {
+                Array looks = (Array)neon.GetField("Looks", Any).GetValue(null);
+                Array mine = (Array)looks.GetValue(NightCity);
+                looks.SetValue(originalTheme, NightCity);
+                RepaintIfShowing(mine);
+                originalTheme = null;
+            }
+            foreach (KeyValuePair<FieldInfo, object> kv in originalBubble) Write(kv.Key, kv.Value);
+            originalBubble.Clear();
+        }
+        catch (Exception e)
+        {
+            if (capri != null) capri.Log("Paint Job could not restore colours: " + e.Message);
+        }
+    }
+
+    object Make(int[] rgb)
+    {
+        int[] c = Shift(rgb);
+        return fromArgb.Invoke(null, new object[] { c[0], c[1], c[2] });
+    }
+
+    // Her yellows sit near hue 56 and her cyans near 189. Anything in those
+    // families takes the chosen hue and keeps its own saturation and lightness.
+    int[] Shift(int[] rgb)
+    {
+        double h, sat, l;
+        ToHsl(rgb, out h, out sat, out l);
+        if (sat < 0.15) return rgb;                                   // greys and near-whites stay
+        double to = -1;
+        if (yellowHue >= 0 && Near(h, 56, 22)) to = yellowHue;
+        else if (cyanHue >= 0 && Near(h, 189, 22)) to = cyanHue;
+        return to < 0 ? rgb : FromHsl(to, sat, l);
+    }
+
+    static bool Near(double h, double centre, double width)
+    {
+        double d = Math.Abs(h - centre) % 360;
+        return Math.Min(d, 360 - d) <= width;
+    }
+
+    // "#FF2E88" -> its hue; -1 when it's her default (no shift) or can't be read.
+    static double HueOf(string hex, string def)
+    {
+        hex = (hex ?? "").Trim().TrimStart('#');
+        if (hex.Length != 6 || string.Equals(hex, def.TrimStart('#'), StringComparison.OrdinalIgnoreCase)) return -1;
+        int v;
+        if (!int.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out v)) return -1;
+        double h, sat, l;
+        ToHsl(new[] { (v >> 16) & 255, (v >> 8) & 255, v & 255 }, out h, out sat, out l);
+        return h;
+    }
+
+    static void ToHsl(int[] c, out double h, out double s, out double l)
+    {
+        double r = c[0] / 255.0, g = c[1] / 255.0, b = c[2] / 255.0;
+        double max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b));
+        l = (max + min) / 2;
+        double d = max - min;
+        if (d < 1e-9) { h = 0; s = 0; return; }
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        if (max == r) h = (g - b) / d + (g < b ? 6 : 0);
+        else if (max == g) h = (b - r) / d + 2;
+        else h = (r - g) / d + 4;
+        h *= 60;
+    }
+
+    static int[] FromHsl(double h, double s, double l)
+    {
+        double q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+        return new[] { Channel(p, q, h / 360 + 1.0 / 3), Channel(p, q, h / 360), Channel(p, q, h / 360 - 1.0 / 3) };
+    }
+
+    static int Channel(double p, double q, double t)
+    {
+        if (t < 0) t += 1;
+        if (t > 1) t -= 1;
+        double v = t < 1.0 / 6 ? p + (q - p) * 6 * t : t < 0.5 ? q : t < 2.0 / 3 ? p + (q - p) * (2.0 / 3 - t) * 6 : p;
+        return (int)Math.Round(Math.Max(0, Math.Min(1, v)) * 255);
+    }
+
+    // If Night City is the theme on screen, run Capri's own theme switch so
+    // every open window swaps the old colours for the new ones.
+    void RepaintIfShowing(Array previous)
+    {
+        if (!ReferenceEquals(neon.GetField("now", Any).GetValue(null), previous)) return;
+        MethodInfo repaint = neon.GetMethod("Repaint", Any);
+        if (repaint == null) return;
+        ParameterInfo[] ps = repaint.GetParameters();
+        object extra = ps.Length > 1 && ps[1].ParameterType.IsArray
+            ? Array.CreateInstance(ps[1].ParameterType.GetElementType(), 0) : null;
+        repaint.Invoke(null, ps.Length > 1 ? new object[] { NightCity, extra } : new object[] { NightCity });
+    }
+
+    // stsfld from a dynamic method: the one way to change a static readonly
+    // field after its class has been set up.
+    static void Write(FieldInfo field, object value)
+    {
+        DynamicMethod dm = new DynamicMethod("set_" + field.Name, null, new[] { typeof(object) },
+                                             field.DeclaringType.Module, true);
+        ILGenerator il = dm.GetILGenerator();
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Unbox_Any, field.FieldType);
+        il.Emit(OpCodes.Stsfld, field);
+        il.Emit(OpCodes.Ret);
+        ((Action<object>)dm.CreateDelegate(typeof(Action<object>)))(value);
+    }
+}
+
+// ---- Options page (Quaisar_THM's shared toolkit) -------------------------------
+// An Options page under Mainframe > Mods, in her colours. Every value lives in
+// this mod's own Store, so it survives restarts and updates. Toggles and
+// numbers apply as you change them; text applies on Enter or when you click away.
+sealed class Opts
+{
+    static readonly Color Back = Color.FromArgb(16, 15, 8), Ink = Color.FromArgb(236, 236, 241),
+        Dim = Color.FromArgb(150, 146, 120), Yellow = Color.FromArgb(252, 239, 3),
+        Cyan = Color.FromArgb(5, 202, 237), Field = Color.FromArgb(30, 29, 14), Edge = Color.FromArgb(90, 86, 10);
+    const int Wide = 690, Right = 470;
+
+    delegate int Row(Control page, int y);
+    readonly ICapriHost host;
+    readonly List<Row> rows = new List<Row>();
+
+    public Opts(ICapriHost host, string title)
+    {
+        this.host = host;
+        host.Ui.SetOptions(title, Build);
+    }
+
+    // Reading values, with sane fallbacks for anything missing or out of range.
+    public bool Flag(string key, bool def) { try { return host.Store.Flag(key, def); } catch (Exception) { return def; } }
+    public double Num(string key, double def, double min, double max)
+    {
+        double v;
+        try { v = host.Store.Number(key, def); } catch (Exception) { v = def; }
+        return double.IsNaN(v) ? def : Math.Max(min, Math.Min(max, v));
+    }
+    public string Str(string key, string def)
+    {
+        try { string v = host.Store.Get(key, def); return v ?? def; } catch (Exception) { return def; }
+    }
+
+    public void Section(string title)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            System.Windows.Forms.Label l = Text(title.ToUpperInvariant(), 18, y + (y > 14 ? 10 : 0), Wide);
+            l.ForeColor = Cyan;
+            l.Font = new Font("Segoe UI Semibold", 9.5f);
+            p.Controls.Add(l);
+            return l.Bottom + 8;
+        });
+    }
+
+    public void Note(string text)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            System.Windows.Forms.Label l = Text(text, 18, y, Wide);
+            l.ForeColor = Dim;
+            l.Font = new Font("Segoe UI", 8.5f);
+            l.Height = TextRenderer.MeasureText(text, l.Font, new Size(Wide, 0), TextFormatFlags.WordBreak).Height + 4;
+            p.Controls.Add(l);
+            return l.Bottom + 8;
+        });
+    }
+
+    public void Toggle(string label, string key, bool def, Action<bool> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
+            Button off = Pill("OFF", Right + 50, y), on = Pill("ON", Right + 140, y);
+            MethodInvoker paint = delegate
+            {
+                bool v = Flag(key, def);
+                Lit(on, v);
+                Lit(off, !v);
+            };
+            off.Click += delegate { Save(key, false); paint(); Tell(changed, false); };
+            on.Click += delegate { Save(key, true); paint(); Tell(changed, true); };
+            paint();
+            p.Controls.Add(off);
+            p.Controls.Add(on);
+            return y + 42;
+        });
+    }
+
+    public void Number(string label, string key, double def, double min, double max, double step, int decimals, Action<double> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
+            NumericUpDown box = new NumericUpDown
+            {
+                Left = Right + 50, Top = y + 2, Width = 170, DecimalPlaces = decimals,
+                Minimum = (decimal)min, Maximum = (decimal)max, Increment = (decimal)step,
+                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f), TextAlign = HorizontalAlignment.Center,
+            };
+            box.Value = (decimal)Num(key, def, min, max);
+            box.ValueChanged += delegate
+            {
+                double v = (double)box.Value;
+                try { host.Store.Set(key, v); } catch (Exception) { }
+                Tell(changed, v);
+            };
+            p.Controls.Add(box);
+            return y + 42;
+        });
+    }
+
+    public void Text(string label, string key, string def, Action<string> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y, Wide));
+            TextBox box = new TextBox
+            {
+                Left = 18, Top = y + 24, Width = Wide, Text = Str(key, def),
+                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f),
+            };
+            string applied = box.Text;
+            MethodInvoker apply = delegate
+            {
+                if (box.Text == applied) return;
+                applied = box.Text;
+                try { host.Store.Set(key, applied); } catch (Exception) { }
+                Tell(changed, applied);
+            };
+            box.Leave += delegate { apply(); };
+            box.KeyDown += delegate(object s, KeyEventArgs e)
+            {
+                if (e.KeyCode != Keys.Enter) return;
+                e.SuppressKeyPress = true;
+                apply();
+            };
+            p.Controls.Add(box);
+            return box.Bottom + 12;
+        });
+    }
+
+    Control Build()
+    {
+        Panel page = new Panel { Width = Wide + 36, BackColor = Back, ForeColor = Ink, Font = new Font("Segoe UI", 9.5f) };
+        int y = 14;
+        foreach (Row r in rows) y = r(page, y);
+        page.Height = y + 10;
+        return page;
+    }
+
+    void Save(string key, bool v) { try { host.Store.Set(key, v); } catch (Exception) { } }
+
+    // A setting that fails to apply is logged, never thrown into her window.
+    void Tell<T>(Action<T> changed, T value)
+    {
+        if (changed == null) return;
+        try { changed(value); }
+        catch (Exception e) { try { host.Log("Options: " + e.Message); } catch (Exception) { } }
+    }
+
+    static System.Windows.Forms.Label Text(string text, int x, int y, int width)
+    {
+        return new System.Windows.Forms.Label { Text = text, Left = x, Top = y, Width = width, AutoSize = false, Height = 22, ForeColor = Ink, BackColor = Color.Transparent };
+    }
+
+    static Button Pill(string text, int x, int y)
+    {
+        Button b = new Button { Text = text, Left = x, Top = y, Width = 84, Height = 30, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Default, Font = new Font("Segoe UI Semibold", 9f) };
+        b.FlatAppearance.BorderColor = Edge;
+        return b;
+    }
+
+    static void Lit(Button b, bool lit)
+    {
+        b.BackColor = lit ? Yellow : Field;
+        b.ForeColor = lit ? Back : Ink;
+        b.FlatAppearance.BorderColor = lit ? Yellow : Edge;
+    }
+
+    // "a, b ,c" -> ["a","b","c"], blanks dropped.
+    public static List<string> Words(string list)
+    {
+        List<string> words = new List<string>();
+        foreach (string w in (list ?? "").Split(','))
+            if (w.Trim().Length > 0) words.Add(w.Trim());
+        return words;
+    }
+}
