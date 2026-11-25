@@ -120,7 +120,7 @@ public class HerColorsUi : ICapriMod
             opts.Section("Where her colours go");
             opts.Toggle("Mainframe (pick Night City under Mainframe colours)", "mainframe", true, again);
             opts.Toggle("Her speech bubble and small widgets", "bubble", true, again);
-            opts.Toggle("Her HUD portrait, and the face on her \"using your mouse\" badge", "hud", true, again);
+            opts.Toggle("Her HUD portrait", "hud", true, again);
             opts.Toggle("Her own computer window", "computer", true, again);
             opts.Toggle("Her file editor and panel art", "editor", true, again);
             opts.Section("Her colours");
@@ -129,54 +129,6 @@ public class HerColorsUi : ICapriMod
             opts.Note("Every shade of her yellow follows the main colour and every shade of cyan follows the accent, each keeping its own brightness, so dark glows and borders change too. Turning the mod off puts Capri's originals back.");
         }
         Apply();
-    }
-
-    // The little face on her control and takeover badges is Capri's own art
-    // (pink hair, green skin). A recoloured copy goes in its place; Stop puts
-    // the original back. Pink/red and green take the main colour, blue/purple
-    // the accent, each pixel keeping its own saturation and lightness.
-    FieldInfo faceField;
-    object originalFace;
-
-    void RecolourFace(Assembly app)
-    {
-        try
-        {
-            Type takeover = app.GetType("CapriDesktop.Takeover", false);
-            faceField = takeover == null ? null : takeover.GetField("Face", Any);
-            System.Drawing.Bitmap face = faceField == null ? null : faceField.GetValue(null) as System.Drawing.Bitmap;
-            if (face == null) return;
-            if (originalFace == null) originalFace = face;
-            System.Drawing.Bitmap copy = new System.Drawing.Bitmap((System.Drawing.Bitmap)originalFace);
-            double main = yellowHue >= 0 ? yellowHue : 56, accent = cyanHue >= 0 ? cyanHue : 189;
-            System.Drawing.Rectangle all = new System.Drawing.Rectangle(0, 0, copy.Width, copy.Height);
-            System.Drawing.Imaging.BitmapData data = copy.LockBits(all, System.Drawing.Imaging.ImageLockMode.ReadWrite, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            try
-            {
-                int count = data.Stride / 4 * data.Height;
-                int[] px = new int[count];
-                System.Runtime.InteropServices.Marshal.Copy(data.Scan0, px, 0, count);
-                for (int i = 0; i < count; i++)
-                {
-                    int a = (px[i] >> 24) & 255;
-                    if (a == 0) continue;
-                    int[] rgb = { (px[i] >> 16) & 255, (px[i] >> 8) & 255, px[i] & 255 };
-                    double h, sat, l;
-                    ToHsl(rgb, out h, out sat, out l);
-                    if (sat < 0.18) continue;
-                    double to;
-                    if (h >= 290 || h < 25 || (h >= 75 && h < 175)) to = main;
-                    else if (h >= 195 && h < 290) to = accent;
-                    else continue;
-                    int[] c = FromHsl(to, sat, l);
-                    px[i] = (a << 24) | (c[0] << 16) | (c[1] << 8) | c[2];
-                }
-                System.Runtime.InteropServices.Marshal.Copy(px, 0, data.Scan0, count);
-            }
-            finally { copy.UnlockBits(data); }
-            faceField.SetValue(null, copy);
-        }
-        catch (Exception e) { capri.Log("Paint Job: couldn't recolour her badge face (" + e.Message + ")"); }
     }
 
     void Reapply()
@@ -222,7 +174,6 @@ public class HerColorsUi : ICapriMod
                 originalBubble[f] = f.GetValue(null);
                 Write(f, Make(kv.Value));
             }
-            if (opts.Flag("hud", true)) RecolourFace(app);
             capri.Log("Paint Job: Night City and her bubble now use her colours.");
         }
         catch (Exception e)
@@ -247,7 +198,6 @@ public class HerColorsUi : ICapriMod
                 originalTheme = null;
             }
             foreach (KeyValuePair<FieldInfo, object> kv in originalBubble) Write(kv.Key, kv.Value);
-            if (faceField != null && originalFace != null) { faceField.SetValue(null, originalFace); originalFace = null; }
             originalBubble.Clear();
         }
         catch (Exception e)
