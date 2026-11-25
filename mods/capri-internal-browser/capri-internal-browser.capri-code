@@ -256,11 +256,7 @@ public class CapriInternalBrowser : ICapriMod
     UseLanguages(host.Store.Get("langpack", ""));
     UseLists(host.Store.Get("lists", ""));
     UseCommands(host.Store.Get("commands", ""));
-    lock (DialNames)
-    {
-      DialNames.Clear();
-      foreach (string line in (host.Store.Get("dial-names", "") ?? "").Split('\n')) { string[] p = line.Split('\t'); if (p.Length == 2 && p[1].Length > 0) DialNames[p[0]] = p[1]; }
-    }
+    ReadDialNames();
     try { if (AdblockFile != null && File.Exists(AdblockFile)) UseAdblock(File.ReadAllText(AdblockFile)); } catch { }
     HomeCss = host.Store.Get("css-home", "") ?? "";
     PagesCss = host.Store.Get("css-pages", "") ?? "";
@@ -4012,6 +4008,66 @@ public class CapriInternalBrowser : ICapriMod
 
   internal void Save() { if (capri != null) look.Save(capri.Store); }
 
+  internal void UseBackup(Dictionary<string, string> got)
+  {
+    foreach (KeyValuePair<string, string> one in got) capri.Store.Set(one.Key, one.Value);
+    lock (gate) dialNow = null;
+    ReadDialNames();
+    look = Look.Load(capri.Store);
+    Lang = look.Lang;
+    SearchEngine = look.Search;
+    Tell("All restored, choom.");
+  }
+
+  void ReadDialNames()
+  {
+    lock (DialNames)
+    {
+      DialNames.Clear();
+      foreach (string line in (capri.Store.Get("dial-names", "") ?? "").Split('\n')) { string[] p = line.Split('\t'); if (p.Length == 2 && p[1].Length > 0) DialNames[p[0]] = p[1]; }
+    }
+  }
+
+  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int how);
+  // Her picture on the desktop, hidden and brought back without taking focus. Only ever brought back if this hid it.
+  bool herHidden;
+  internal void HideHer(bool hide)
+  {
+    if (hide == herHidden) return;
+    try
+    {
+      Form her = capri.Ui.Window;
+      if (her == null || her.IsDisposed || !her.IsHandleCreated || (hide && !her.Visible)) return;
+      ShowWindow(her.Handle, hide ? 0 : 4);
+      herHidden = hide;
+    }
+    catch (Exception error) { capri.Log("hiding her: " + error.Message); }
+  }
+
+  // The window closes, anything in between is done, and it opens again with its tabs, the same one in front.
+  internal bool Restarting;
+  internal string FrontWas;
+  internal void Restart(Form window, string front, Action between)
+  {
+    if (window == null || Restarting) return;
+    List<Kept> was = Reopen();
+    Restarting = true;
+    FrontWas = front;
+    window.FormClosed += delegate
+    {
+      WinTimer wait = new WinTimer { Interval = 900 };
+      wait.Tick += delegate
+      {
+        wait.Dispose();
+        try { if (stopped) return; Keep(was); if (between != null) between(); OpenBrowser(null, null); }
+        catch (Exception error) { Note("restart: " + error.Message); }
+        finally { Restarting = false; }
+      };
+      wait.Start();
+    };
+    window.Close();
+  }
+
   internal string Folder { get { return capri == null ? Path.Combine(Path.GetTempPath(), "capri-internal-browser") : capri.Folder; } }
 
   // ---- Look: screen mode, font and text size ----
@@ -5048,6 +5104,7 @@ public class CapriInternalBrowser : ICapriMod
     if (at >= 0 && at < jobs.Count) jobs[at] = job; else { if (jobs.Count >= 30) return "That's thirty jobs already. Delete one first."; jobs.Add(job); }
     SaveJobs(jobs);
     lock (jobMissed) jobMissed.Remove(trigger);
+    lock (jobTests) jobTests.Remove(trigger);
     Tell(Line("jobsaved", "Ugh, more commands, choom?", "Okayy, choom.", "Wowww, choom, you really got me working?", "Fine, fine. Saved it, choom.", "Another job? I'm gonna start charging, choom.", "Got it. Say the word and I'm on it."));
     return null;
   }
@@ -5133,7 +5190,33 @@ public class CapriInternalBrowser : ICapriMod
   }
 
   // Runs the steps from one. A step that needs their yes stops here and carries on from the next step after it.
-  internal void RunJob(Job job, int from)
+  // Each step's result from a job's last test: the step, worked/failed/skipped, and why.
+  internal readonly Dictionary<string, List<string[]>> jobTests = new Dictionary<string, List<string[]>>();
+  static readonly Regex NotDone = new Regex(@"^(?:nothing|there's|the page didn't|the tab|that's|open |no |i couldn't|couldn't|say |use |stopped|you haven't|it isn't|capri browser isn't|i can't|can't)", Plain);
+
+  static string[] StepResult(string step, string said)
+  {
+    if (string.IsNullOrEmpty(said)) return new[] { step, "worked", "" };
+    if (said.Begins("ASK:")) return new[] { step, "skipped", "it waits for your yes, so the test left it" };
+    if (said.Begins("skipped "))
+    {
+      Match why = Regex.Match(said, @"\(([^()]*(?:\([^()]*\)[^()]*)*)\)$");
+      string reason = why.Success ? why.Groups[1].Value : said;
+      return new[] { step, Regex.IsMatch(reason, "yours to|brain's offline|your yes", Plain) ? "skipped" : "failed", reason };
+    }
+    return new[] { step, NotDone.IsMatch(said) ? "failed" : "worked", NotDone.IsMatch(said) ? Clip(OneLine(said), 160) : "" };
+  }
+
+  void TestDone(Job job, List<string[]> log, string[] steps)
+  {
+    if (steps != null) while (log.Count < steps.Length) log.Add(new[] { steps[log.Count].Trim(), "skipped", "the job stopped before it" });
+    int good = log.FindAll(delegate(string[] r) { return r[1] == "worked"; }).Count;
+    lock (jobTests) jobTests[job.Trigger] = log;
+    InBrowser(delegate(Browser b) { b.ShowJobs(); return null; });
+    capri.Say("Tested " + job.Trigger + ", choom: " + good + " of " + log.Count + (log.Count == 1 ? " step" : " steps") + " worked." + (noThought ? " My brain didn't answer on some, so try another model in Capri Mainframe." : ""));
+  }
+
+  internal void RunJob(Job job, int from, List<string[]> log = null)
   {
     try
     {
@@ -5157,10 +5240,13 @@ public class CapriInternalBrowser : ICapriMod
         stepAfter = next;
         wholeJob = string.Join(" / ", steps);
         Match notes = Regex.Match(next, @"^(?:then\s+)?(?:add|put|save|write)\s+(?:it|that|this|them)?\s*(?:to|in|into)\s+(?:my\s+|the\s+)?(?<book>[\w' -]*?)\s*notes?(?:book)?$", Plain);
-        if (Regex.IsMatch(step, @"^(?:summari[sz]e|sum\s+(?:it\s+)?up|tl;?dr)", Plain) && notes.Success) { NoteFromPage("summarise", notes.Groups["book"].Value); i++; Thread.Sleep(1500); continue; }
+        if (Regex.IsMatch(step, @"^(?:summari[sz]e|sum\s+(?:it\s+)?up|tl;?dr)", Plain) && notes.Success) { NoteFromPage("summarise", notes.Groups["book"].Value); i++; if (log != null) { log.Add(StepResult(step, null)); log.Add(StepResult(next, null)); } Thread.Sleep(1500); continue; }
         ShowThinking(job.Trigger + ": " + step, i + 1, steps.Length);
         string said = Step(step);
+        if (Halted || stopped) break;
+        if (log != null) log.Add(StepResult(step, said));
         if (said == null) continue;
+        if (log != null && said.Begins("ASK:")) { lock (gate) pend = null; continue; }
         if (said.Begins("ASK:"))
         {
           int carry = i + 1;
@@ -5177,11 +5263,12 @@ public class CapriInternalBrowser : ICapriMod
       }
       jobSite = null;
       ShowThinking(null);
+      if (log != null) { TestDone(job, log, steps); return; }
       if (i < steps.Length) return;
       lock (jobMissed) if (missed.Count > 0) jobMissed[job.Trigger] = string.Join(", ", missed.ToArray()); else jobMissed.Remove(job.Trigger);
       if (missed.Count > 0) capri.Say("Done with " + job.Trigger + ", choom, but I couldn't do " + string.Join(", ", missed.ToArray()) + (noThought ? ". My brain didn't answer, so try another model in Capri Mainframe." : ". You can reword that on your Custom jobs page."));
     }
-    catch (Exception error) { jobSite = null; ShowThinking(null); capri.Log("job: " + error.Message); capri.Say("That job glitched partway, choom."); }
+    catch (Exception error) { jobSite = null; ShowThinking(null); capri.Log("job: " + error.Message); if (log != null) { log.Add(new[] { "(the job glitched)", "failed", Clip(error.Message, 120) }); TestDone(job, log, null); return; } capri.Say("That job glitched partway, choom."); }
   }
 
   // One step in plain words, done. Null when it's done (or said), "ASK:question" when it needs their yes, else what happened.
@@ -5957,7 +6044,7 @@ public class CapriInternalBrowser : ICapriMod
     public bool Asleep;              // snoozed: put to sleep after 20 minutes unused, woken by a click
     public float Pop;                // 1 to 0 just after it's picked, for the pop
     public string Seen;             // the page's words when they last left it, for "what did I miss?"
-    public DateTime LeftAt;
+    public DateTime LeftAt, CrashAt;
     public int Tracked;             // trackers stopped on the page it's showing
     public int Blocked;             // ads blocked on the page it's showing     // OnReader: one of her own pages (results or the new tab page), not a website
     public Panel Chip;
@@ -6141,9 +6228,9 @@ public class CapriInternalBrowser : ICapriMod
       Controls.Add(strip);
       Recolor();
       UsePointer(this);
-      if (owner.look.Restore) foreach (Kept was in owner.Reopen()) OpenTab(was.Page, was.Address, false);
+      if (owner.look.Restore || owner.Restarting) foreach (Kept was in owner.Reopen()) OpenTab(was.Page, was.Address, false);
       if (shown != null || startAt != null || tabs.Count == 0) OpenTab(shown, startAt, true);
-      else Select(tabs[tabs.Count - 1]);
+      else Select((owner.Restarting ? tabs.Find(delegate(Tab one) { return one.Address != null && one.Address == owner.FrontWas; }) : null) ?? tabs[tabs.Count - 1]);
       HandleCreated += delegate
       {
         Cue();
@@ -8956,6 +9043,7 @@ public class CapriInternalBrowser : ICapriMod
     {
       if (on == full) return;
       full = on;
+      mod.HideHer(on && !byKey && Flag("hideher", false));
       Form whole = FindForm();
       if (whole != null) whole.SuspendLayout();
       SuspendLayout();
@@ -10328,6 +10416,17 @@ public class CapriInternalBrowser : ICapriMod
     // The job Capri learn just rewrote, shown in its open form till it's saved.
     int draftAt = -1;
     Job draft;
+    // How each step went the last time it was tested.
+    string TestNote(Look look, string trigger)
+    {
+      List<string[]> log;
+      lock (mod.jobTests) if (!mod.jobTests.TryGetValue(trigger, out log)) return "";
+      StringBuilder html = new StringBuilder("<p><b>LAST TEST</b></p><ul style='list-style:none;padding:0;margin:0 0 10px'>");
+      foreach (string[] r in log)
+        html.Append("<li style='padding:3px 0'><b style='color:").Append(look.Colors[r[1] == "worked" ? 4 : r[1] == "failed" ? 5 : 3]).Append("'>").Append(r[1] == "worked" ? "\u2713" : r[1] == "failed" ? "\u2715" : "\u2013").Append(" ").Append(r[1].ToUpperInvariant()).Append("</b> ").Append(Esc(r[0])).Append(r[2].Length > 0 ? "<br><i>" + Esc(r[2]) + "</i>" : "").Append("</li>");
+      return html.Append("</ul>").ToString();
+    }
+
     string MissedNote(string trigger)
     {
       string missed;
@@ -10379,7 +10478,7 @@ public class CapriInternalBrowser : ICapriMod
           html.Append("<ol class='js'>");
           int k = 0;
           foreach (string step in j.Steps.Split('\n')) if (step.Trim().Length > 0) html.Append("<li style='--i:").Append(k++).Append("'>").Append(Esc(step)).Append("</li>");
-          html.Append("</ol>").Append(MissedNote(j.Trigger)).Append("<div class='row'><button class='bt m go' onclick=\"J(").Append(i).Append(",'run')\">\u25B6 Run it</button><button class='bt' onclick='E(").Append(i)
+          html.Append("</ol>").Append(TestNote(look, j.Trigger)).Append(MissedNote(j.Trigger)).Append("<div class='row'><button class='bt m go' onclick=\"J(").Append(i).Append(",'run')\">\u25B6 Run it</button><button class='bt' onclick=\"J(").Append(i).Append(",'test')\">Test</button><button class='bt' onclick='E(").Append(i)
             .Append(")'>Edit</button><button class='bt' onclick=\"J(").Append(i).Append(",'del')\">Delete</button></div></div>");
         }
         html.Append("<div class='jf'>").Append(drafted ? "<p class='ok'>\u2726 Capri learned your job and rewrote it so she can do it. Check it over, then Save.</p>" : "").Append("<label>When I say</label><input class='t q' maxlength='100' placeholder='\"movie night / film time\"' value='").Append(Esc(fresh && !drafted ? "" : "\"" + shown.Trigger + "\"")).Append("'>")
@@ -10390,7 +10489,7 @@ public class CapriInternalBrowser : ICapriMod
       }
       html.Append("</div></div></div><script>function J(i,a){var c=document.getElementById('j'+i),u='").Append(Own).Append("jobs?a='+a+'&i='+i;")
         .Append("if(a=='del'&&!confirm('Delete this job?'))return;if(a=='save'||a=='fix'){u+='&t='+encodeURIComponent(c.querySelector('.t').value)+'&l='+encodeURIComponent(c.querySelector('.l').value)+'&s='+encodeURIComponent(c.querySelector('.s').value);c.querySelector(a=='fix'?'.rw':'.jf .bt.m').classList.add(a=='fix'?'busy':'sv');if(a=='fix'){c.querySelector('.rw').textContent='Learning...';c.classList.add('run');}}")
-        .Append("if(a=='run'){c.classList.add('run');setTimeout(function(){c.classList.remove('run')},4000);}location.href=u;}")
+        .Append("if(a=='run'||a=='test'){c.classList.add('run');setTimeout(function(){c.classList.remove('run')},4000);}location.href=u;}")
         .Append("function E(i){var c=document.getElementById('j'+i);c.classList.toggle('ed');if(c.classList.contains('ed'))c.querySelector('.t').focus();}")
         .Append("function N(){var c=document.querySelector('.nw');c.scrollIntoView({behavior:'smooth',block:'center'});c.classList.remove('fl');void c.offsetWidth;c.classList.add('fl');setTimeout(function(){c.querySelector('.t').focus({preventScroll:true})},450);}")
         .Append(draftAt >= 0 ? "document.getElementById('j" + draftAt + "').scrollIntoView({block:'center'});" : "")
@@ -10530,6 +10629,7 @@ public class CapriInternalBrowser : ICapriMod
       html.Append(open(4)).Append(Row(T(36), "Strict may break some sites.", Pick("track", levels, levelNames, look.Track.ToString(), false)));
       html.Append(Row(T(41), About("t41"), Switch("ads", look.Ads))).Append(extras("privacy"));
       html.Append(Row(T(42), About("t42"), Btn("wipe", T(42), false)));
+      html.Append(Row("Backup", "Saves your notes, bookmarks, Speed Dial, jobs and settings to a file. Never passwords, history, tabs or sign-ins.", Btn("backup", "Back up", false) + Btn("unbackup", "Restore", false)));
       html.Append("<h3 class='sub'>SITE SETTINGS</h3>").Append(Row("All sites", About("allsites"), "<button class='bt' onclick=\"S('site','*')\">Open</button>"));
       SortedDictionary<string, int> changed = PermSites();
       foreach (KeyValuePair<string, int> one in changed)
@@ -10608,6 +10708,8 @@ public class CapriInternalBrowser : ICapriMod
         case "wallpaper": ImportWallpaper(); break;
         case "nowall": mod.RemoveWallpaper(); ShowWallState(null); RefreshHomes(); break;
         case "wipe": ClearSiteData(); break;
+        case "backup": Later(BackUp); return;
+        case "unbackup": Later(RestoreFrom); return;
         case "update": UpdateAll(); return;
         case "getlangs": Fetch("languages.txt", delegate(string got) { UseLanguages(got); if (Languages.GetLength(0) < 2) { mod.Tell("That language file didn't look right."); return; } Host.Store.Set("langpack", got); foreach (Tab open in tabs) if (open.Special == "settings") ShowReader(open); mod.Tell("Languages downloaded. Pick one in Settings."); }); return;
         case "folder": PickSaveFolder(); break;
@@ -11467,6 +11569,73 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
         finally { Poke(box, 0x439, IntPtr.Zero, IntPtr.Zero); g.ReleaseHdc(dc); }
       }
       return pic;
+    }
+
+    // ---- Backup: only what's on this list, as plain text. Never passwords, history, tabs, sign-ins, site permissions or leaderboard keys ----
+    static readonly Regex BackedUp = new Regex("^(?:theme|font|size|sites|names|language|search|ads|restore|track|allowed|trackok|dial|dial-names|bookmarks|bookfolders|notes|notelist|notebooks|notebookof|noteedited|noteswidth|jobs|research|researchlen|animesite|animelink|videosite|videolink|soundvol|holospot|cleanparts|(?:side|pin|opt)-[a-z0-9-]{1,30})$");
+    // Reading or sending messages is always switched on by hand, never by a file.
+    static readonly Regex ByHand = new Regex("^opt-(?:read|autoread|discord|quietmsg)");
+    const string BackupHead = "Capri Browser backup 1";
+
+    string BackupText()
+    {
+      StringBuilder file = new StringBuilder(BackupHead + "\n");
+      foreach (string key in mod.capri.Store.Keys)
+        if (BackedUp.IsMatch(key) && !ByHand.IsMatch(key))
+          file.Append(key).Append('\t').Append((mod.capri.Store.Get(key, "") ?? "").Replace("\\", "\\\\").Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t")).Append('\n');
+      return file.ToString();
+    }
+
+    // What a backup file holds, or null when it isn't one or something in it isn't safe.
+    internal static Dictionary<string, string> ReadBackup(string text)
+    {
+      string[] lines = (text ?? "").Replace("\r", "").Split('\n');
+      if (lines[0] != BackupHead) return null;
+      Dictionary<string, string> got = new Dictionary<string, string>();
+      foreach (string line in lines)
+      {
+        int cut = line.IndexOf('\t');
+        string key = cut < 1 ? "" : line.Substring(0, cut);
+        if (!BackedUp.IsMatch(key) || ByHand.IsMatch(key)) continue;
+        string value = Regex.Replace(line.Substring(cut + 1), @"\\(.)", delegate(Match m) { char c = m.Groups[1].Value[0]; return c == 'n' ? "\n" : c == 'r' ? "\r" : c == 't' ? "\t" : c.ToString(); });
+        // Links can only be web pages, and notes can't hold embedded objects.
+        if (Regex.IsMatch(key, "^(?:dial|bookmarks|jobs|animelink|videolink)") && Regex.IsMatch(value, @"(?:^|[\t\n])\s*(?:javascript|vbscript|data|file):", Plain)) return null;
+        if (key == "notelist" && Regex.IsMatch(value, @"\\obj(?:ect|data|emb|link|class|ocx|update)", Plain)) return null;
+        got[key] = value;
+      }
+      return got.Count == 0 ? null : got;
+    }
+
+    void BackUp()
+    {
+      try
+      {
+        using (SaveFileDialog pick = new SaveFileDialog { Title = "Back up Capri Browser", Filter = "Capri Browser backup|*.capribackup", FileName = "Capri Browser " + DateTime.Now.ToString("yyyy-MM-dd") + ".capribackup" })
+        {
+          if (pick.ShowDialog(FindForm()) != DialogResult.OK) return;
+          File.WriteAllText(pick.FileName, BackupText(), new UTF8Encoding(false));
+          mod.Tell("Backed up, choom. Your notes are readable in that file, so keep it somewhere safe.");
+        }
+      }
+      catch (Exception error) { mod.Tell("I couldn't save the backup: " + error.Message); }
+    }
+
+    void RestoreFrom()
+    {
+      try
+      {
+        using (OpenFileDialog pick = new OpenFileDialog { Title = "Restore Capri Browser", Filter = "Capri Browser backup|*.capribackup" })
+        {
+          if (pick.ShowDialog(FindForm()) != DialogResult.OK) return;
+          Dictionary<string, string> got = new FileInfo(pick.FileName).Length > 50000000 ? null : ReadBackup(File.ReadAllText(pick.FileName, Encoding.UTF8));
+          if (got == null) { mod.Tell("That isn't a Capri Browser backup I can trust, choom, so I left everything as it was."); return; }
+          string spare = Path.Combine(mod.Folder, "before-restore.capribackup");
+          if (MessageBox.Show(FindForm(), "This replaces your notes, bookmarks, Speed Dial, jobs and settings with the backup's, then restarts Capri Browser. What you have now is saved first as:\n" + spare + "\n\nGo ahead?", "Capri Browser", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+          File.WriteAllText(spare, BackupText(), new UTF8Encoding(false));
+          Restart(delegate { mod.UseBackup(got); });
+        }
+      }
+      catch (Exception error) { mod.Tell("I couldn't restore it: " + error.Message); }
     }
 
     // A card's outline: cut corners top left and bottom right.
@@ -14039,6 +14208,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       { "sleep", "Snooze tabs after 20 minutes unused", "1", "tabs" },
       { "lazy", "Joking refusals (\"find it yourself, choom\")", "1", "capri" },
       { "autopip", "Pop videos out when switching tabs", "0", "video" },
+      { "hideher", "Hide Capri while a video is full screen", "0", "video" },
       { "capmenu", "Capri-styled right-click menu", "1", "look" },
       { "lookask", "Ask before looking things up", "1", "research" },
       { "researchmenu", "Let Capri research this in the right-click menu", "1", "research" },
@@ -14171,7 +14341,16 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       Item(i, T(31), "Ctrl+Shift+S", t != null && !t.Private, Summarise);
       i.Add(new ToolStripSeparator());
       Item(i, T(7), null, true, delegate { SettingsShown = true; });
+      Item(i, "Restart", null, true, delegate { Later(delegate { Restart(null); }); });
       return m;
+    }
+
+    // Closes Capri Browser and opens it again with the same websites. Private tabs are never kept, so it asks first.
+    internal void Restart(Action between)
+    {
+      if (tabs.Exists(delegate(Tab t) { return t.Private && t.Page == null && !t.OnReader; }) && MessageBox.Show(FindForm(), "Private tabs aren't kept, so they'll close. Restart anyway?", "Capri Browser", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+      Remember();
+      mod.Restart(FindForm(), tab == null || tab.Private ? null : tab.Address, between);
     }
 
     // Right-click a tab.
@@ -14663,6 +14842,35 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
 
     // ---- pages ----
 
+    // A crashed page is reloaded the first time, and asked about if it crashes again within a minute. When the whole engine
+    // stops, Capri Browser restarts with its tabs (once a minute at most, so it can never loop).
+    static DateTime engineAt;
+    void PageCrashed(Tab t, int kind)
+    {
+      DateTime now = DateTime.UtcNow;
+      if (kind == 0)
+      {
+        if (mod.Restarting || now < engineAt.AddSeconds(5)) return;
+        bool soon = now < engineAt.AddMinutes(1);
+        engineAt = now;
+        mod.Note("page engine crashed");
+        if (soon) { mod.Tell("The page engine crashed again, choom. Press Restart in the menu when you're ready."); return; }
+        mod.Tell("The page engine crashed, so I'm restarting Capri Browser with your tabs, choom.");
+        Remember();
+        mod.Restart(FindForm(), tab == null || tab.Private ? null : tab.Address, null);
+        return;
+      }
+      if (kind > 2 || (!tabs.Contains(t) && !t.Hidden)) return;
+      bool again = now < t.CrashAt.AddMinutes(1);
+      if (kind == 2 && again) return;
+      t.CrashAt = now;
+      if (kind == 2) { if (!t.Hidden) mod.Tell("\"" + Clip(t.Title, 50) + "\" isn't responding, choom. Give it a moment, or press F5 to reload it."); return; }
+      mod.Note("a page crashed");
+      if (again && (t.Hidden || MessageBox.Show(FindForm(), "\"" + Clip(t.Title, 60) + "\" keeps crashing. Reload it?", "Capri Browser", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)) return;
+      if (t.OnReader) ShowReader(t); else t.Viewer.Reload();
+      if (!again && !t.Hidden) mod.Tell("That page crashed, so I reloaded it, choom.");
+    }
+
     // The video player when it's installed and on, otherwise the classic engine.
     Viewer MakeViewer(Tab t)
     {
@@ -14710,6 +14918,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       v.Downloading = delegate(object operation, string file, string from) { Downloading(operation, file, from); };
       v.PageMenu = delegate { if (Masked(t)) return true; if (!(t == tab && t.OnReader && t.Special == null && t.Address == null && (t.Page == null || t.Page.Results.Count == 0))) return false; Later(DialMenu); return true; };
       v.Typed = delegate { if (t == tab) Blip("key"); };
+      v.Crashed = delegate(int kind) { Later(delegate { PageCrashed(t, kind); }); };
       v.Escaped = delegate { if (mod.Driving) mod.Halt(); };
       v.Tracks = delegate(int count) { if (count > t.Tracked) tracksNew += count - t.Tracked; t.Tracked = count; if (t == tab) ShowShield(); };
       v.Shield = delegate(string what)
@@ -14949,7 +15158,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
           return;
         }
         else if (a == "del") { mod.DropJob(ji); jobNote = null; draftAt = -1; }
-        else if (a == "run") { List<Job> jobs = mod.Jobs(); if (ji >= 0 && ji < jobs.Count) { Job run = jobs[ji]; mod.Tell("Running " + run.Trigger + ", choom."); Behind(delegate { mod.RunJob(run, 0); }); } return; }
+        else if (a == "run" || a == "test") { List<Job> jobs = mod.Jobs(); if (ji >= 0 && ji < jobs.Count) { Job run = jobs[ji]; mod.Tell((a == "test" ? "Testing " : "Running ") + run.Trigger + ", choom."); Behind(delegate { mod.RunJob(run, 0, a == "test" ? new List<string[]>() : null); }); } return; }
         ShowReader(t);
         return;
       }
@@ -15710,6 +15919,8 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
 
     // PageMenu: a right-click on the page itself (not a link, picture or text box); true when Capri Browser showed its own menu.
     public Func<bool> PageMenu;
+    // Crashed: 0 the whole page engine stopped, 1 this page did, 2 it isn't responding.
+    public Action<int> Crashed;
     // Typed: a key was pressed on the page (only for typing sounds).
     public Action Typed;
     // Escaped: Esc was pressed on the page.
@@ -15785,6 +15996,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
           return;
         }
         core = Get(view, "CoreWebView2");
+        Hook(core, "ProcessFailed", delegate(object failed) { if (Crashed != null) Crashed(Convert.ToInt32(Get(failed, "ProcessFailedKind"))); });
         Hook(core, "WindowCloseRequested", delegate(object done) { if (CloseAsked != null) CloseAsked(); });
         // Popups and "open in new tab" stay in Capri Browser.
         Hook(core, "NewWindowRequested", delegate(object request)
