@@ -18,6 +18,7 @@ using CapriDesktop;
 public class FloatingNotes : ICapriMod
 {
     ICapriHost capri;
+    readonly object lifecycle = new object();
     System.Threading.Timer waiting;
     Form her;
     NoteWindow window;
@@ -37,7 +38,14 @@ public class FloatingNotes : ICapriMod
         NoteWindow.MostNotes = (int)opts.Num("most", 10, 1, 30);
         NoteWindow.Life = opts.Num("life", 2.2, 0.5, 6);
         NoteWindow.Rise = opts.Num("rise", 55, 10, 200);
-        waiting = new System.Threading.Timer(delegate { Attach(); }, null, 0, 500);
+        lock (lifecycle)
+        {
+            if (waiting != null) return;
+            System.Threading.Timer run = null;
+            run = new System.Threading.Timer(delegate { Attach(run); }, null, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
+            waiting = run;
+            run.Change(0, System.Threading.Timeout.Infinite);
+        }
     }
 
     public bool Heard(string words) { return false; }
@@ -46,11 +54,19 @@ public class FloatingNotes : ICapriMod
     {
         try
         {
-            if (waiting != null) { waiting.Dispose(); waiting = null; }
-            Form f = her;
-            NoteWindow w = window;
-            window = null;
-            if (f != null && !f.IsDisposed && w != null) f.BeginInvoke((MethodInvoker)delegate { w.Close(); w.Dispose(); });
+            Form f;
+            NoteWindow w;
+            lock (lifecycle)
+            {
+                if (waiting != null) { waiting.Dispose(); waiting = null; }
+                f = her;
+                w = window;
+                her = null;
+                window = null;
+            }
+            if (f == null || f.IsDisposed || w == null) return;
+            MethodInvoker close = delegate { w.Close(); w.Dispose(); };
+            if (f.InvokeRequired) f.BeginInvoke(close); else close();
         }
         catch (Exception e)
         {
@@ -58,29 +74,42 @@ public class FloatingNotes : ICapriMod
         }
     }
 
-    void Attach()
+    void Attach(System.Threading.Timer run)
     {
-        Form f = null;
         try
         {
-            foreach (Form o in Application.OpenForms)
-                if (o.GetType().FullName == "CapriDesktop.Companion" && o.IsHandleCreated) f = o;
-        }
-        catch (InvalidOperationException) { return; }
-        if (f == null || waiting == null) return;
-        waiting.Dispose();
-        waiting = null;
-        her = f;
-        f.BeginInvoke((MethodInvoker)delegate
-        {
-            // On her window's thread, where an error would take her down.
-            try
+            lock (lifecycle)
             {
-                window = new NoteWindow(f, capri);
-                capri.Log("Music Notes: ready for music.");
+                if (waiting != run) return;
+                Form f = null;
+                try
+                {
+                    foreach (Form o in Application.OpenForms)
+                        if (o.GetType().FullName == "CapriDesktop.Companion" && o.IsHandleCreated) f = o;
+                }
+                catch (InvalidOperationException) { }
+                if (f == null)
+                {
+                    run.Change(500, System.Threading.Timeout.Infinite);
+                    return;
+                }
+                f.BeginInvoke((MethodInvoker)delegate
+                {
+                    lock (lifecycle)
+                    {
+                        if (waiting != run || f.IsDisposed) return;
+                        try
+                        {
+                            window = new NoteWindow(f, capri);
+                            her = f;
+                            capri.Log("Music Notes: ready for music.");
+                        }
+                        catch (Exception e) { capri.Log("Music Notes could not start: " + e.Message); }
+                    }
+                });
             }
-            catch (Exception e) { capri.Log("Music Notes could not start: " + e.Message); }
-        });
+        }
+        catch (Exception e) { capri.Log("Music Notes could not start: " + e.Message); }
     }
 }
 
