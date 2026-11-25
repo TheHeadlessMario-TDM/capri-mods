@@ -132,7 +132,9 @@ public class CapriInternalBrowser : ICapriMod
 	void Holo(string text, bool talking)
 	{
 		Browser b = open;
-		if (stopped || !Flag("holo", false) || b == null || b.IsDisposed || !b.IsHandleCreated) return;
+		if (stopped || b == null || b.IsDisposed || !b.IsHandleCreated) return;
+		if (text != null) b.Post(delegate { b.HerSays(text); });
+		if (!Flag("holo", false)) return;
 		b.Post(delegate { b.Holo(text, talking); });
 	}
 
@@ -404,7 +406,7 @@ public class CapriInternalBrowser : ICapriMod
 		if (WhatsNewAsk.IsMatch(said)) { newsAsked = true; return false; }
 		if (ResearchHeard(said)) return true;
 		if (RunJobFor(said) || JobVoice(said)) return true;
-		if (HerAsk.IsMatch(said)) { WithBrowser(now => { now.ShowHerPage(); return null; }); capri.Say("Don't judge me, choom."); return true; }
+		if (HerAsk.IsMatch(said)) { WithBrowser(now => { now.ShowHerPage(); return null; }); capri.Say(Line("herroom", "Come in, choom. Wipe your feet.", "My place. Don't touch the goat.")); return true; }
 		if (HerGift.IsMatch(said))
 		{
 			string gift = null;
@@ -4279,9 +4281,9 @@ public class CapriInternalBrowser : ICapriMod
 	};
 
 	// Browser addons, pinned to one commit. Every file must match its SHA-256 here, or it isn't used.
-	const string AddonsCommit = "687e90a36b8c569ec945aa5f799f6e5b904f65ed";
+	const string AddonsCommit = "1f700b4288e7817502454ab2efa46103b83ab456";
 	const string Addons = "https://raw.githubusercontent.com/tob7as/Browser-addons/" + AddonsCommit + "/";
-	const string AddonHashes = "data/adblock.txt=f38d348c8396b5680bf97d38678abd9e2d200a8438deb5edf3c7e2c86fc96346;data/commands.txt=e1d3e5bcbed9ef9ca4bef7f0fff6b63f4399f3eeb0e91692a19f240f79c8db4b;data/lists.txt=559b71af6b4a62c354e7ec6eba3d98fcfea95d8dcbcbe11561b6b898b3771bad;games.txt=72379fea00637a9efe61cb52b285a136368b7f2556da57fe7e086734450ae891;games/anime.html=454cdb79b13b338449f0a9bc21bb630d2757273565721798ecfd2422828d31ce;games/celebs.html=ea4604ec23d2970969637b0e0bcc583c365329418149f980b7be74f3c5e8b2bf;games/daily.html=8fe939bee76b10c73f6f1ee687302bf69332aa2043e4c1a8f98aab304c3d1ec2;games/freegames.html=dd34dc788b27df8e0b68d42573e12d8a623b20d53f648be28b1a9a15bb33641d;games/guess.txt=1bca3689c63ed41b0dca427081b6358889cd576e7174240e9da781ba681054a0;games/memory.html=45d48eb7f452a205f86c1d32458036cd7995e931cf62d9b8163ee7750f5436bb;games/reaction.html=4194adf2ee79863a8c2f59aac8db72ee97689c037146c9dd8fdf8bcf077dff2f;games/roulette.txt=8fe6d057f1fc387ae0e6992f33b9766baaa903fb5cb278069daae254fc487eee;games/snake.html=0df0872c916664c5cc452eb5e70153d6b25fda9efb02d0e44ea50023e36123fd;games/typing.html=f89ec2cfbbfcbca6a7e913a1e8b30b5075745d043c620c5e273c85a11d6eab49;games/wiki.txt=a237f5f75227a6d1a5a70e70ca732fa7a032f06a18184207c8b9483aa6406cdf;help.txt=9a25a73a1420da55e2d8cbd72a6b1f6cbaebf40bf05948fa615e3fc159724f35;help/ar.txt=4914623d662f0b222cb781d653289df6a57392716aa7e0f3e5a180c81df80d66;help/bn.txt=a7cd0067a3652c6a5327880550e3e3c3545c41c1ee939b948d292137e6a4cdb6;help/de.txt=a32c62ee9133c377f13dae70e3eae4a8dce03071c05db834494d67a4132bc0a3;help/es.txt=77cdb74690f8ba05723a83001d5628a635bc1ce4771e67aabd0662b134a59e16;help/fil.txt=1cfd0c226cb0dc31a8cb284ede440148879533cf1766897dd3b5fbfbfb411185;help/fr.txt=fcca0c1e9e51c3e14c1aefbf73d6404378c743c403466d06a49572a8926057e9;help/hi.txt=d91a3b3d409c5ff567393fa882e3bc9e7da6b74712f3a807deda55f76a365d1b;help/id.txt=4fdc0b2f0760369abe3118872acfbafe0487122db3854a013aef2496e788e67a;help/it.txt=49a20f2139ad74a8546ced32151efdd4be1288b0b80942e742f67df0c6b20d29;help/ja.txt=b6a36ae1d3acb9b7eee608d2319167272f961867cba51bf58e8bbe18d796d68e;help/ko.txt=c4a8e6be7b747bb49c7ac4bc23f816bc776198b6eeef70af4c3fe794ee639f71;help/nl.txt=30792ec2e67a5545ab22c06c2bd602d8eefcdbac956c9baabc5fd32ded258374;help/pl.txt=06023f5466c93b841ab156fe4785cb3f20ff343b118bf63e9e0becfede232618;help/pt.txt=fc9c2c07380ac0b2ea1989653fd6bde06c02497f376399fb37fa255af61ff595;help/ru.txt=889ac1260ca4168396efc2a8b195a468fbe033ed94edfbe89789cf66d428fa18;help/sv.txt=241071f376140f19cbcfba0343214d747fb4bab085503a7bc3b0a00dc5155e0a;help/th.txt=574bb8a137d4ce5b2c3bb76f8b4dd7b7cb4fa47f8d1abad35510a8f6c504693c;help/tr.txt=e6f42478904e93321a9c6bdda0cddfac2f83e8bba91556db77a9622ab2df6100;help/uk.txt=575b67faecabc31568a1bec9bacd791c9de226629bd3ca8e1289b3e2cfcca63e;help/vi.txt=c4e07bcff348ad94db67e7d1d4e40b22488f28aa3040c2928eac7da95da90bac;help/zh-hans.txt=3832be4515798185f48c4be76724de6518a4bcdf5d14ed18d46911b4b38d7050;help/zh-hant.txt=3feb901a0fe9eb9088b453c5eda0dacc623a6c053ccbaea62ebe7203b6aa4bc5;languages.txt=e7a6d0a8e6477ca3ec0fac8bbee7715340b1b7c213b4b1fcb1b44156d97eca6b;pages/guess.js=8d451ce04fc6aa5cca8352702d3337e01bc17d8cf28def5f3dbbff2013e82bf9;pages/her.html=b8eea7efc27aac5829803b8a79ea97808acef669942b194702e87817b414b70a;pages/home.css=c86f0bd138d3f9e7317872eb44522f35c7bc51b76bd796e4c254c5e1305da645;pages/pages.css=f30510042634eb27310b1baa40575f0dff6696d24acb24795fabf4c84436681e;pages/race-clock.js=f440b43e32b7c760aefcf8a065f3c59c44da5688d19970e10dfc3b297c04c23d;pages/welcome.html=a2b6d38e3343c420c6ff17ed6d1ec00eadf505d7bcbc7cfc3fba6a58d0416a99;settings.css=b1b05b20bc210385de5306bc2b7ff99f441b41fb328d0cd0d498be10b4c94cf8;whats-new.txt=1dcfa60640c0f7c43bdf916a70e0d1aaf83c40e92e870680d56bad2821d89eb9";
+	const string AddonHashes = "data/adblock.txt=f38d348c8396b5680bf97d38678abd9e2d200a8438deb5edf3c7e2c86fc96346;data/commands.txt=e1d3e5bcbed9ef9ca4bef7f0fff6b63f4399f3eeb0e91692a19f240f79c8db4b;data/lists.txt=559b71af6b4a62c354e7ec6eba3d98fcfea95d8dcbcbe11561b6b898b3771bad;games.txt=72379fea00637a9efe61cb52b285a136368b7f2556da57fe7e086734450ae891;games/anime.html=454cdb79b13b338449f0a9bc21bb630d2757273565721798ecfd2422828d31ce;games/celebs.html=ea4604ec23d2970969637b0e0bcc583c365329418149f980b7be74f3c5e8b2bf;games/daily.html=8fe939bee76b10c73f6f1ee687302bf69332aa2043e4c1a8f98aab304c3d1ec2;games/freegames.html=dd34dc788b27df8e0b68d42573e12d8a623b20d53f648be28b1a9a15bb33641d;games/guess.txt=1bca3689c63ed41b0dca427081b6358889cd576e7174240e9da781ba681054a0;games/memory.html=45d48eb7f452a205f86c1d32458036cd7995e931cf62d9b8163ee7750f5436bb;games/reaction.html=4194adf2ee79863a8c2f59aac8db72ee97689c037146c9dd8fdf8bcf077dff2f;games/roulette.txt=8fe6d057f1fc387ae0e6992f33b9766baaa903fb5cb278069daae254fc487eee;games/snake.html=0df0872c916664c5cc452eb5e70153d6b25fda9efb02d0e44ea50023e36123fd;games/typing.html=f89ec2cfbbfcbca6a7e913a1e8b30b5075745d043c620c5e273c85a11d6eab49;games/wiki.txt=a237f5f75227a6d1a5a70e70ca732fa7a032f06a18184207c8b9483aa6406cdf;help.txt=0d06f49cf5d9a36bec127e1e67a42ed96d60bfa23c2776eb15233baac3435173;help/ar.txt=4914623d662f0b222cb781d653289df6a57392716aa7e0f3e5a180c81df80d66;help/bn.txt=a7cd0067a3652c6a5327880550e3e3c3545c41c1ee939b948d292137e6a4cdb6;help/de.txt=a32c62ee9133c377f13dae70e3eae4a8dce03071c05db834494d67a4132bc0a3;help/es.txt=77cdb74690f8ba05723a83001d5628a635bc1ce4771e67aabd0662b134a59e16;help/fil.txt=1cfd0c226cb0dc31a8cb284ede440148879533cf1766897dd3b5fbfbfb411185;help/fr.txt=fcca0c1e9e51c3e14c1aefbf73d6404378c743c403466d06a49572a8926057e9;help/hi.txt=d91a3b3d409c5ff567393fa882e3bc9e7da6b74712f3a807deda55f76a365d1b;help/id.txt=4fdc0b2f0760369abe3118872acfbafe0487122db3854a013aef2496e788e67a;help/it.txt=49a20f2139ad74a8546ced32151efdd4be1288b0b80942e742f67df0c6b20d29;help/ja.txt=b6a36ae1d3acb9b7eee608d2319167272f961867cba51bf58e8bbe18d796d68e;help/ko.txt=c4a8e6be7b747bb49c7ac4bc23f816bc776198b6eeef70af4c3fe794ee639f71;help/nl.txt=30792ec2e67a5545ab22c06c2bd602d8eefcdbac956c9baabc5fd32ded258374;help/pl.txt=06023f5466c93b841ab156fe4785cb3f20ff343b118bf63e9e0becfede232618;help/pt.txt=fc9c2c07380ac0b2ea1989653fd6bde06c02497f376399fb37fa255af61ff595;help/ru.txt=889ac1260ca4168396efc2a8b195a468fbe033ed94edfbe89789cf66d428fa18;help/sv.txt=241071f376140f19cbcfba0343214d747fb4bab085503a7bc3b0a00dc5155e0a;help/th.txt=574bb8a137d4ce5b2c3bb76f8b4dd7b7cb4fa47f8d1abad35510a8f6c504693c;help/tr.txt=e6f42478904e93321a9c6bdda0cddfac2f83e8bba91556db77a9622ab2df6100;help/uk.txt=575b67faecabc31568a1bec9bacd791c9de226629bd3ca8e1289b3e2cfcca63e;help/vi.txt=c4e07bcff348ad94db67e7d1d4e40b22488f28aa3040c2928eac7da95da90bac;help/zh-hans.txt=3832be4515798185f48c4be76724de6518a4bcdf5d14ed18d46911b4b38d7050;help/zh-hant.txt=3feb901a0fe9eb9088b453c5eda0dacc623a6c053ccbaea62ebe7203b6aa4bc5;languages.txt=e7a6d0a8e6477ca3ec0fac8bbee7715340b1b7c213b4b1fcb1b44156d97eca6b;pages/guess.js=8d451ce04fc6aa5cca8352702d3337e01bc17d8cf28def5f3dbbff2013e82bf9;pages/her.html=4ffedc28a5af0c78d4eaee981022ea1032106b127e9dc330ccc19c6bd56da878;pages/home.css=c86f0bd138d3f9e7317872eb44522f35c7bc51b76bd796e4c254c5e1305da645;pages/pages.css=f30510042634eb27310b1baa40575f0dff6696d24acb24795fabf4c84436681e;pages/race-clock.js=f440b43e32b7c760aefcf8a065f3c59c44da5688d19970e10dfc3b297c04c23d;pages/room.txt=3f6306891c4d3ab702e1e1fa34d0e84c02a17ee03059151c089845094ff8528f;pages/welcome.html=a2b6d38e3343c420c6ff17ed6d1ec00eadf505d7bcbc7cfc3fba6a58d0416a99;settings.css=b1b05b20bc210385de5306bc2b7ff99f441b41fb328d0cd0d498be10b4c94cf8;whats-new.txt=353372f2b4cc89f3e0de9368ba5d437f0232b229fc06d1bf6f18b0a9e993cb3a";
 
 	// A Browser addons file, only if it's one of ours and matches its fingerprint; throws otherwise.
 	internal static string Pinned(WebClient web, string file)
@@ -4375,7 +4377,7 @@ public class CapriInternalBrowser : ICapriMod
 	// ---- 2.0: things she does straight away when asked ----
 
 	// "skip 2 minutes", "go back 30 seconds", "fast forward a minute", "skip to 3:20".
-	static readonly Regex HerAsk = new Regex(@"^(?:hey\s+)?(?:capri[,\s]+)?(?:what\s+have\s+you\s+been\s+(?:looking\s+at|browsing|up\s+to\s+online)|(?:(?:can|could)\s+(?:you|i)\s+)?(?:show|open|see|visit|go\s+to|pull\s+up)\s+(?:me\s+)?(?:your|capri'?s)\s+(?:own\s+)?(?:(?:home\s*)?page|profile))\W*$", Plain);
+	static readonly Regex HerAsk = new Regex(@"^(?:hey\s+)?(?:capri[,\s]+)?(?:what\s+have\s+you\s+been\s+(?:looking\s+at|browsing|up\s+to\s+online)|(?:(?:can|could)\s+(?:you|i|we)\s+)?(?:let'?s\s+)?(?:show|open|see|visit|go\s+(?:to|in(?:to)?)|enter|take\s+me\s+to|come\s+(?:in(?:to)?|over\s+to)|pull\s+up)\s+(?:me\s+)?(?:your|capri'?s)\s+(?:own\s+)?(?:(?:bed)?room|place|apartment|house|crib|pad|(?:home\s*)?page|profile))\W*$", Plain);
 	static readonly Regex HerGift = new Regex(@"^(?:hey\s+)?(?:capri[,\s]+)?(?:i\s+(?:think|bet)\s+)?(?:you(?:'?d|'ll|\s+would|\s+will|\s+might)\s+(?:like|love)\s+this(?:\s+(?:one|page|site|video))?|(?:gift|give)\s+(?:(?:this|it)(?:\s+(?:one|page|site|video))?\s+to\s+(?:you|yourself|capri)|you\s+this(?:\s+(?:one|page|site|video))?)|(?:put|add|keep|stick)\s+(?:this|it)(?:\s+(?:one|page|site|video))?\s+(?:on|to)\s+your\s+(?:own\s+)?(?:page|profile))\W*$", Plain);
 	static readonly Regex JobsAsk = new Regex(@"^(?:open|show|edit|make|add|create)\s+(?:me\s+)?(?:my\s+|a\s+|the\s+)?(?:new\s+)?custom\s+jobs?(?:\s+page)?$", Plain);
 	static readonly Regex SkipBy = new Regex(@"^(?:can\s+you\s+)?(?<dir>skip|go|jump|fast\s*forward|forward|ff|rewind|go\s+back|back|move)\s+(?:ahead\s+|forward\s+|back\s+|backwards?\s+)?(?:by\s+)?(?<n>\d+(?:\.\d+)?|an?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|forty\s+five|fifty|sixty|ninety|half\s+an?|a\s+half)\s*(?<u>s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?)(?:\s+and\s+a\s+half)?(?<back>\s+(?:back|backwards?|behind))?(?:\s+(?:ahead|forward))?(?:\s+(?:in|on)\s+(?:the|this)\s+(?:video|vid))?$", Plain);
@@ -8158,7 +8160,7 @@ public class CapriInternalBrowser : ICapriMod
 			{ "cleaner", "Capri Cleaner", "", "BROWSER FEATURES", "1", "" },
 			{ "history", "History", "", "BROWSER FEATURES", "1", "" },
 			{ "games", "Games", "", "FUN", "1", "" },
-			{ "her", "Capri's page", "\uE77B", "FUN", "1", "" },
+			{ "her", "Capri's room", "\uE77B", "FUN", "1", "" },
 			{ "jobs", "Custom jobs", "", "FUN", "1", "" },
 			{ "passwords", "Passwords", "", "BROWSER FEATURES", "1", "" },
 			{ "chatgpt", "ChatGPT", "", "AI SERVICES", "0", "https://chatgpt.com/" },
@@ -10430,7 +10432,7 @@ public class CapriInternalBrowser : ICapriMod
 
 		int settingsY;
 
-		// ---- Capri's own page: a made-up profile, new every day. All of it stays on this PC ----
+		// ---- Capri's room: a made-up place, new every day. All of it stays on this PC ----
 		internal void ShowHerPage()
 		{
 			foreach (Tab open in tabs) if (open.Special == "her") { ShowReader(open); Select(open); return; }
@@ -10455,13 +10457,100 @@ public class CapriInternalBrowser : ICapriMod
 			}
 			StringBuilder html = Start(mod.look, "");
 			html.Replace("<head>", "<head><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data:;form-action 'none';base-uri 'none'\">");
-			if (page.Length < 100) return html.Append("<p style='padding:40px'>Getting Capri's page... If it doesn't show, check you're online and open it again.</p></body></html>").ToString();
+			if (page.Length < 100) return html.Append("<p style='padding:40px'>Opening Capri's room... If it doesn't show, check you're online and open it again.</p></body></html>").ToString();
 			var state = new StringBuilder("{");
-			string[,] stats = { { "typing", "typingbest" }, { "tabs", "maxtabs" }, { "ads", "ads" }, { "jobs", "jobs" }, { "streak", "dailystreak" }, { "guess", "guess" } };
+			string[,] stats = { { "typing", "typingbest" }, { "tabs", "maxtabs" }, { "ads", "ads" }, { "jobs", "jobs" }, { "streak", "dailystreak" }, { "guess", "guess" }, { "survival", "survival" }, { "wiki", "wiki" }, { "night", "night" }, { "notes", "notes" } };
+			if (Kept("her-been") != "1") Keep("her-been", "1");
+			state.Append("drop:").Append(Kept("her-drop").Length > 0 ? 1 : 0).Append(',');
 			for (int i = 0; i < stats.GetLength(0); i++) state.Append(stats[i, 0]).Append(':').Append(Stat(stats[i, 1])).Append(',');
 			state.Append("watch:").Append(Stat("watchall") / 60).Append(",save:").Append(Quote(Kept("her-save"))).Append(",face:").Append(Quote(HerFace())).Append(",gifts:[");
 			foreach (string[] g in Gifts()) state.Append('[').Append(Quote(g[0])).Append(',').Append(Quote(g[1])).Append("],");
 			return html.Append(Colored(page, mod.look.Colors).Replace("%OWN%", Own).Replace("%STATE%", state.Append("]}").ToString())).Append("</body></html>").ToString();
+		}
+
+		// The room's model and light (a file kept beside the mod, checked by its fingerprint every time) and her own drawings, given to the page.
+		void SendRoom(Tab t)
+		{
+			Behind(delegate
+			{
+				string file = Host == null || string.IsNullOrEmpty(Host.Folder) ? null : Path.Combine(Host.Folder, "her-room.txt"), got = null;
+				try { if (file != null && File.Exists(file)) got = File.ReadAllText(file); } catch { }
+				if (!Matches("pages/room.txt", got))
+				{
+					got = null;
+					try { using (WebClient web = new WebClient()) got = Pinned(web, "pages/room.txt"); if (file != null) File.WriteAllText(file, got); } catch { }
+				}
+				ToHer(t, got == null ? "window.herNoRoom&&herNoRoom()" : "window.herRoom&&herRoom(" + got + ")");
+				if (got == null) return;
+				for (int i = 0; i < HerMoves.GetLength(0); i++)
+				{
+					string one = null;
+					try { one = HerMove(HerMoves[i, 0], int.Parse(HerMoves[i, 1]), int.Parse(HerMoves[i, 2])); } catch { }
+					if (one != null) ToHer(t, "window.herArt&&herArt({" + HerMoves[i, 0] + ":" + one + "})");
+				}
+			});
+		}
+
+		void ToHer(Tab t, string script) { Post(delegate { if (tabs.Contains(t) && t.Special == "her") t.Viewer.Script(script); }); }
+
+		// Her moves: the drawing's name, how wide one picture of it is, and pictures a second.
+		static readonly string[,] HerMoves = { { "idle", "116", "24" }, { "arrive", "240", "15" }, { "walk", "240", "12" }, { "perch", "196", "30" }, { "laydown", "372", "30" }, { "grin", "240", "8" }, { "dance", "384", "8" } };
+		string HerMove(string name, int wide, int fps)
+		{
+			using (Bitmap art = Host.Art(name))
+			{
+				if (art == null) return null;
+				// Older skins' standing drawings are wider.
+				if (name == "idle" && art.Width % wide != 0) { wide = 240; fps = 6; }
+				int all = Math.Max(1, art.Width / wide), n = Math.Min(name == "arrive" ? 14 : 12, all), high = Math.Min(256, art.Height), w = Math.Max(1, wide * high / art.Height);
+				using (var strip = new Bitmap(w * n, high))
+				using (Graphics g = Graphics.FromImage(strip))
+				using (var png = new MemoryStream())
+				{
+					g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+					for (int i = 0; i < n; i++) g.DrawImage(art, new Rectangle(i * w, 0, w, high), i * all / n * wide, 0, wide, art.Height, GraphicsUnit.Pixel);
+					strip.Save(png, ImageFormat.Png);
+					return "{n:" + n + ",w:" + w + ",h:" + high + ",fps:" + ((double)fps * n / all).ToString("0.##", CultureInfo.InvariantCulture) + ",u:'data:image/png;base64," + Convert.ToBase64String(png.ToArray()) + "'}";
+				}
+			}
+		}
+
+		internal void HerSays(string line)
+		{
+			if (tab != null && tab.Special == "her" && herIn) tab.Viewer.Script("window.herSay&&herSay(" + Quote(Clip(line, 220)) + ")");
+		}
+
+		// She's in her room, so not on the desktop too: hidden while the room's in front, back as soon as it isn't.
+		bool herIn, herAway;
+		WinTimer herWatch;
+		void WatchHer()
+		{
+			if (herWatch != null) return;
+			herWatch = new WinTimer { Interval = 400 };
+			herWatch.Tick += delegate
+			{
+				bool any = tabs.Exists(t => t.Special == "her");
+				Form window = FindForm();
+				int pid = 0;
+				bool home = any && herIn && Flag("herhome", true) && tab != null && tab.Special == "her" && Visible && window != null && window.Visible && window.WindowState != FormWindowState.Minimized
+					&& GetWindowThreadProcessId(GetForegroundWindow(), out pid) != 0 && pid == Process.GetCurrentProcess().Id;
+				if (home && !mod.HerHidden) { mod.ShowHer(false); herAway = mod.HerHidden; }
+				else if (!home && herAway) { herAway = false; if (!full) mod.ShowHer(true); }
+				if (!any) { herWatch.Dispose(); herWatch = null; }
+			};
+			herWatch.Start();
+			// The browser closed: she's back, whatever else happens.
+			Disposed += delegate { if (herWatch != null) herWatch.Dispose(); herWatch = null; if (herAway) { herAway = false; mod.ShowHer(true); } };
+		}
+
+		// Now and then something for her shelf turns up while they browse. Nothing is put on the page itself.
+		void HerDrop()
+		{
+			if (Kept("her-been") != "1" || Kept("her-drop").Length > 0 || Kept("her-dropday") == DateTime.Now.ToString("yyyy-MM-dd")) return;
+			if (dice.Next(45) != 0) return;
+			Keep("her-drop", "1");
+			Keep("her-dropday", DateTime.Now.ToString("yyyy-MM-dd"));
+			mod.Tell(Line("herdrop", "Ooh, something fell out of this page. I put it on my shelf.", "Found something here, choom. It's in my room."));
 		}
 
 		string HerFace()
@@ -10509,12 +10598,14 @@ public class CapriInternalBrowser : ICapriMod
 		// Her page's own buttons.
 		void HerLink(Tab t, string url)
 		{
-			Match m = Regex.Match(url, @"[?&](s|go|del|reset)=([^&]*)");
+			Match m = Regex.Match(url, @"[?&](s|go|del|reset|in|room)=([^&]*)");
 			if (!m.Success) return;
 			string what = m.Groups[1].Value, value = Uri.UnescapeDataString(m.Groups[2].Value);
 			Uri to;
 			int n;
-			if (what == "s") { if (value.Length <= 4000 && value.Begins("{")) Keep("her-save", value); return; }
+			if (what == "s") { if (value.Length <= 4000 && value.Begins("{")) Keep("her-save", value); Keep("her-drop", ""); return; }
+			if (what == "in") { herIn = value == "1"; return; }
+			if (what == "room") { SendRoom(t); return; }
 			if (what == "go") { if (Uri.TryCreate(value, UriKind.Absolute, out to) && to.Scheme == "https") OpenTab(null, value, true); return; }
 			if (what == "reset") Keep("her-save", "");
 			List<string[]> all = Gifts();
@@ -14104,7 +14195,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
 			SideButton("\uE81C", T(49), null).Click += delegate { ShowHistory(); };
 			SideButton("\uE7FC", "Games", null).Click += delegate { ShowGames(); };
 			SideButton("\uE8FD", "Custom jobs", null).Click += delegate { ShowJobs(); };
-			SideButton("\uE77B", "Capri's page", null).Click += delegate { ShowHerPage(); };
+			SideButton("\uE77B", "Capri's room", null).Click += delegate { ShowHerPage(); };
 			SideExtras(sideStart);
 			Button welcome = SideButton(((char)0xE946).ToString(), "Welcome and useful information", null);
 			welcome.Dock = DockStyle.Bottom;
@@ -14309,6 +14400,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
 			{ "lazy", "Joking refusals (\"find it yourself, choom\")", "1", "react" },
 			{ "autopip", "Pop videos out when switching tabs", "0", "video" },
 			{ "hideher", "Hide Capri while a video is full screen", "0", "video" },
+			{ "herhome", "Hide Capri from the desktop while you're in her room", "1", "capri" },
 			{ "capmenu", "Capri-styled right-click menu", "1", "look" },
 			{ "lookask", "Ask before looking things up", "1", "research" },
 			{ "researchmenu", "Let Capri research this in the right-click menu", "1", "research" },
@@ -14971,7 +15063,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
 				Uri went;
 				string risk = Flag("scam", true) && !t.Hidden && Uri.TryCreate(url, UriKind.Absolute, out went) && went.Host != warnedHost ? Scam(went) : null;
 				if (risk != null) { warnedHost = new Uri(url).Host; if (Flag("glitch", true)) t.Viewer.Script(RedGlitch); mod.Tell("Careful, choom: this page looks sketchy, " + risk + ". Don't sign in or pay here unless you're sure."); }
-				if (!t.Private && !t.Hidden) { Bump("pages", 1); if (DateTime.Now.Hour >= 1 && DateTime.Now.Hour < 5) Bump("night", 1, true); }
+				if (!t.Private && !t.Hidden) { Bump("pages", 1); HerDrop(); if (DateTime.Now.Hour >= 1 && DateTime.Now.Hour < 5) Bump("night", 1, true); }
 				if (race != null && race.Tab == t) Raced(url);
 				if (Masked(t)) { t.Viewer.Script("document.documentElement.style.filter='blur(18px)'"); Guess(t); }
 				if (t == tab && !adding && !address.Focused) address.Text = url;
@@ -15125,7 +15217,8 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
 			if (t.Special == "her")
 			{
 				t.Viewer.Html(HerPage());
-				Retitle(t, "Capri's page");
+				Retitle(t, "Capri's room");
+				WatchHer();
 				if (t == tab) address.Text = "";
 				return;
 			}
