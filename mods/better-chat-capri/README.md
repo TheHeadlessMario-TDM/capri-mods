@@ -1,9 +1,12 @@
 # Better Chat // Capri
 
+![Better Chat // Capri](preview.png)
+
 Tired of messy speech cutoffs and sticky chat bubbles? Take full control over Capri's voice flow and HUD!
 
-**How to use:** Hover over Capri to bring up her action pill and click the chat bubble icon on the left to toggle her speech bubble on or off. 
-When talking to her via voice, speak naturally — pause for 2.5 seconds when you're finished so she sends your full thought at once, or hit `Esc` to cancel and try again.
+- Kind: code mod
+- Made by: CyberPhantxm
+- Needs: chat and voice permissions
 
 | Feature | Behavior |
 |---|---|
@@ -13,8 +16,6 @@ When talking to her via voice, speak naturally — pause for 2.5 seconds when yo
 | 2.5s Smart Debounce | Waits 2.5 seconds after you stop speaking before sending your message, resetting the timer if you continue talking and filtering out background noise or short filler sounds. |
 | Native Audio Chimes | Follows your selected `Sound set` when opening a voice command, plays `Shard` once the 2.5s pause sends your prompt, and plays `Pulse` when cancelled with `Esc`. |
 
-- Compatibility: Mute Button MOD (by: Potato), Hologram Speech Glass (by: Dominik20074)
+**How to use:** Hover over Capri to bring up her action pill and click the chat bubble icon on the left to toggle her speech bubble on or off. When talking to her via voice, speak naturally — pause for 2.5 seconds when you're finished so she sends your full thought at once, or hit `Esc` to cancel and try again.
 
-- Kind: code mod
-- Made by: CyberPhantxm
-- Needs: chat and voice permissions
+- Compatibility: Mute Button MOD (by: Potato), Hologram Speech Glass (by: Dominik20074)
