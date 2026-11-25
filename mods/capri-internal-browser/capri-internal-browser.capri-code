@@ -10409,7 +10409,7 @@ public class CapriInternalBrowser : ICapriMod
 			{
 				string l = lines[n].Trim().TrimStart('\u2022').Trim();
 				int cut = l.IndexOf(": ", Exact);
-				html.Append("<p class='nl'>").Append(cut > 0 && cut < 50 ? "<b>" + Esc(l.Substring(0, cut)) + "</b>" + Esc(l.Substring(cut + 2)) : Esc(l)).Append("</p>");
+				html.Append("<p class='nl'>").Append(cut > 0 && cut < 85 ? "<b>" + Esc(l.Substring(0, cut)) + "</b>" + Esc(l.Substring(cut + 2)) : Esc(l)).Append("</p>");
 			}
 			return html.Append(parts.Length < 2 ? "" : "<details><summary class='hint' style='cursor:pointer'>Older versions</summary><div class='pre'>" + Esc(Clip(parts[1], 9000)) + "</div></details>").ToString();
 		}
