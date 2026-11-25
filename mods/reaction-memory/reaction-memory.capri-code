@@ -27,7 +27,9 @@ public class OwnLines : ICapriMod
     readonly List<Said> said = new List<Said>();
     readonly object gate = new object();
     Action<CapriMessage> speaking;
-    Func<string> context;
+    Action<CapriMessage> replying;
+    string replySource;
+    bool running;
 
     public void Start(ICapriHost host)
     {
@@ -36,19 +38,23 @@ public class OwnLines : ICapriMod
         {
             opts = new Opts(host, "Reaction Memory");
             opts.Section("What she remembers");
-            opts.Number("Lines she remembers", "keep", 12, 1, 50, 1, 0, delegate(double v) { keep = (int)v; Trim(); });
-            opts.Number("Forget them after (minutes)", "minutes", 30, 1, 240, 5, 0, delegate(double v) { fresh = TimeSpan.FromMinutes(v); });
-            opts.Toggle("Also remember her chat replies (they're usually already in the chat)", "replies", false, delegate(bool v) { sayReplies = v; });
+            opts.Number("Lines she remembers", "keep", 12, 1, 50, 1, 0, delegate(double v) { lock (gate) { keep = (int)v; Trim(); } });
+            opts.Number("Forget them after (minutes)", "minutes", 30, 1, 240, 5, 0, delegate(double v) { lock (gate) fresh = TimeSpan.FromMinutes(v); });
+            opts.Toggle("Also remember her chat replies (they're usually already in the chat)", "replies", false, delegate(bool v) { lock (gate) sayReplies = v; });
             opts.Note("Her own lines are reactions, greetings, check-ins and idle chatter. These get added to every message you send her, so she knows what you're answering.");
         }
-        keep = (int)opts.Num("keep", 12, 1, 50);
-        fresh = TimeSpan.FromMinutes(opts.Num("minutes", 30, 1, 240));
-        sayReplies = opts.Flag("replies", false);
-        stopped = false;
+        lock (gate)
+        {
+            keep = (int)opts.Num("keep", 12, 1, 50);
+            fresh = TimeSpan.FromMinutes(opts.Num("minutes", 30, 1, 240));
+            sayReplies = opts.Flag("replies", false);
+            running = true;
+        }
+        replying = OnReplying;
         speaking = OnSpeaking;
-        context = Context;
+        host.Chat.Replying += replying;
         host.Voice.Speaking += speaking;
-        if (!contextAdded) { host.Chat.AddContext(context); contextAdded = true; }
+        host.Chat.AddContext(Context);
         host.Log("Reaction Memory: she remembers what she said on her own.");
     }
 
@@ -57,38 +63,49 @@ public class OwnLines : ICapriMod
     public void Stop()
     {
         if (capri == null) return;
-        try { capri.Voice.Speaking -= speaking; } catch { }
-        // ClearContext drops every mod's context, not just this one, so this
-        // one stays registered and simply goes quiet.
-        lock (gate) said.Clear();
-        stopped = true;
+        lock (gate)
+        {
+            running = false;
+            replySource = null;
+            said.Clear();
+        }
+        capri.Chat.Replying -= replying;
+        capri.Voice.Speaking -= speaking;
+        capri.Chat.ClearContext();
     }
-    bool stopped, contextAdded;
+
+    // The host calls Replying and then Speaking synchronously for the same line.
+    // Speaking labels every line as speech, so use Replying to tell replies from remarks.
+    void OnReplying(CapriMessage m)
+    {
+        lock (gate) if (running) replySource = m.Source;
+    }
 
     // Every line she says out loud passes through here. Chat replies are
     // already in her conversation, so only her own lines are kept.
     void OnSpeaking(CapriMessage m)
     {
-        if (m == null || m.Cancel || string.IsNullOrWhiteSpace(m.Text)) return;
-        if (!sayReplies && string.Equals(m.Source, "reply", StringComparison.OrdinalIgnoreCase)) return;
-        if (string.Equals(m.Source, "you", StringComparison.OrdinalIgnoreCase)) return;
-        string text = m.Text.Trim();
         lock (gate)
         {
+            string source = replySource;
+            replySource = null;
+            if (!running || source == null || m == null || m.Cancel || string.IsNullOrWhiteSpace(m.Text)) return;
+            if (source != "remark" && !(sayReplies && source == "reply")) return;
+            string text = m.Text.Trim();
             if (said.Count > 0 && said[said.Count - 1].Text == text) return;   // same line twice
-            said.Add(new Said { At = DateTime.Now, Source = m.Source ?? "", Text = text });
+            said.Add(new Said { At = DateTime.Now, Source = source, Text = text });
+            Trim();
         }
-        Trim();
     }
 
-    void Trim() { lock (gate) while (said.Count > keep) said.RemoveAt(0); }
+    void Trim() { while (said.Count > keep) said.RemoveAt(0); }
 
     string Context()
     {
-        if (stopped) return null;
         StringBuilder b = new StringBuilder();
         lock (gate)
         {
+            if (!running) return null;
             foreach (Said s in said)
             {
                 if (DateTime.Now - s.At > fresh) continue;
@@ -98,7 +115,7 @@ public class OwnLines : ICapriMod
             }
         }
         if (b.Length == 0) return null;
-        return "Things you said out loud on your own in the last half hour, oldest first. "
+        return "Recent lines in your voice, oldest first. "
              + "These were your words, not the user's. If they reply to one, you know what they mean:\n" + b;
     }
 }

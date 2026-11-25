@@ -14,4 +14,4 @@ Capri's reactions, greetings and check-ins don't go through chat, so her brain n
 ### Why the mod check flags it
 - **Changes what her brain is told**: that's the point; it adds the lines she said out loud, marked as her own words.
 
-No network access, no keys, nothing sent anywhere.
+The mod makes no network requests. Saved lines become part of the prompt for your selected brain, including when you use a cloud provider.
