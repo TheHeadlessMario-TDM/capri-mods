@@ -1,0 +1,435 @@
+// capri-mod: 1
+// id: music-notes
+// name: Music Notes
+// version: 1.0.0
+// author: Quaisar_THM
+// description: Music notes float up around her while she's dancing to your music.
+// requires: api 3
+
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Text;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+using CapriDesktop;
+
+public class FloatingNotes : ICapriMod
+{
+    ICapriHost capri;
+    readonly object lifecycle = new object();
+    System.Threading.Timer waiting;
+    Form her;
+    NoteWindow window;
+    Opts opts;
+
+    public void Start(ICapriHost host)
+    {
+        capri = host;
+        if (opts == null)
+        {
+            opts = new Opts(host, "Music Notes");
+            opts.Section("The notes");
+            opts.Number("Most notes at once", "most", 10, 1, 30, 1, 0, delegate(double v) { NoteWindow.MostNotes = (int)v; });
+            opts.Number("How long a note floats (seconds)", "life", 2.2, 0.5, 6, 0.1, 1, delegate(double v) { NoteWindow.Life = v; });
+            opts.Number("How fast they rise", "rise", 55, 10, 200, 5, 0, delegate(double v) { NoteWindow.Rise = v; });
+        }
+        NoteWindow.MostNotes = (int)opts.Num("most", 10, 1, 30);
+        NoteWindow.Life = opts.Num("life", 2.2, 0.5, 6);
+        NoteWindow.Rise = opts.Num("rise", 55, 10, 200);
+        lock (lifecycle)
+        {
+            if (waiting != null) return;
+            System.Threading.Timer run = null;
+            run = new System.Threading.Timer(delegate { Attach(run); }, null, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
+            waiting = run;
+            run.Change(0, System.Threading.Timeout.Infinite);
+        }
+    }
+
+    public bool Heard(string words) { return false; }
+
+    public void Stop()
+    {
+        try
+        {
+            Form f;
+            NoteWindow w;
+            lock (lifecycle)
+            {
+                if (waiting != null) { waiting.Dispose(); waiting = null; }
+                f = her;
+                w = window;
+                her = null;
+                window = null;
+            }
+            if (f == null || f.IsDisposed || w == null) return;
+            MethodInvoker close = delegate { w.Close(); w.Dispose(); };
+            if (f.InvokeRequired) f.BeginInvoke(close); else close();
+        }
+        catch (Exception e)
+        {
+            if (capri != null) capri.Log("Music Notes could not stop: " + e.Message);
+        }
+    }
+
+    void Attach(System.Threading.Timer run)
+    {
+        try
+        {
+            lock (lifecycle)
+            {
+                if (waiting != run) return;
+                Form f = null;
+                try
+                {
+                    foreach (Form o in Application.OpenForms)
+                        if (o.GetType().FullName == "CapriDesktop.Companion" && o.IsHandleCreated) f = o;
+                }
+                catch (InvalidOperationException) { }
+                if (f == null)
+                {
+                    run.Change(500, System.Threading.Timeout.Infinite);
+                    return;
+                }
+                f.BeginInvoke((MethodInvoker)delegate
+                {
+                    lock (lifecycle)
+                    {
+                        if (waiting != run || f.IsDisposed) return;
+                        try
+                        {
+                            window = new NoteWindow(f, capri);
+                            her = f;
+                            capri.Log("Music Notes: ready for music.");
+                        }
+                        catch (Exception e) { capri.Log("Music Notes could not start: " + e.Message); }
+                    }
+                });
+            }
+        }
+        catch (Exception e) { capri.Log("Music Notes could not start: " + e.Message); }
+    }
+}
+
+sealed class NoteWindow : Form
+{
+    const BindingFlags Inst = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+    const int Across = 280, High = 240, Fps = 30;
+    // Set from the mod's Options; read every frame, so changes show at once.
+    internal static int MostNotes = 10;
+    internal static double Life = 2.2, Rise = 55;
+    static readonly string[] Glyphs = { "♪", "♫", "♬" };
+    static readonly Color[] Colors = { Color.FromArgb(252, 239, 3), Color.FromArgb(0, 255, 255), Color.FromArgb(5, 202, 237) };
+    static readonly Color Clear = Color.FromArgb(1, 2, 3);
+
+    [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr window, uint affinity);
+
+    sealed class Note { public string Glyph; public Color Ink; public double X, Born, Sway; }
+
+    readonly Form her;
+    readonly ICapriHost capri;
+    readonly FieldInfo music, hidden;
+    readonly object groove;
+    readonly MethodInfo locked;
+    readonly List<Note> notes = new List<Note>();
+    readonly Random random = new Random();
+    readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+    readonly Timer tick = new Timer();
+    readonly Font font = new Font("Segoe UI Symbol", 20f, FontStyle.Bold);
+    double nextNote;
+
+    internal NoteWindow(Form her, ICapriHost capri)
+    {
+        this.her = her;
+        this.capri = capri;
+        Type t = her.GetType();
+        music = t.GetField("musicOn", Inst);
+        hidden = t.GetField("hidden", Inst);
+        FieldInfo g = t.GetField("groove", Inst);
+        if (music == null || hidden == null || g == null) throw new MissingFieldException("Companion", "musicOn");
+        groove = g.GetValue(her);
+        locked = groove.GetType().GetMethod("Locked", Inst);
+
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        StartPosition = FormStartPosition.Manual;
+        TopMost = true;
+        BackColor = Clear;
+        TransparencyKey = Clear;
+        Size = new Size(Across, High);
+        DoubleBuffered = true;
+        tick.Interval = 1000 / Fps;
+        tick.Tick += OnTick;
+        tick.Start();
+    }
+
+    // Clicks pass through, it never takes focus, and it stays out of the taskbar and Alt+Tab.
+    protected override CreateParams CreateParams
+    {
+        get { CreateParams p = base.CreateParams; p.ExStyle |= 0x20 | 0x80000 | 0x80 | 0x8000000; return p; }
+    }
+
+    protected override bool ShowWithoutActivation { get { return true; } }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        // Same as her other windows: left out of the screenshots she takes.
+        try { SetWindowDisplayAffinity(Handle, 0x11); }
+        catch (EntryPointNotFoundException) { }
+    }
+
+    double Gap()
+    {
+        if (locked != null)
+        {
+            object[] beat = { 0.0, 0.0 };
+            if ((bool)locked.Invoke(groove, beat) && (double)beat[0] > 0)
+                return Math.Max(0.4, Math.Min(1.2, 120.0 / (double)beat[0]));
+        }
+        return 0.8;
+    }
+
+    void OnTick(object sender, EventArgs e)
+    {
+        try
+        {
+            if (her.IsDisposed) { tick.Stop(); Close(); return; }
+            double now = clock.Elapsed.TotalSeconds;
+            bool playing = (bool)music.GetValue(her) && !(bool)hidden.GetValue(her) && her.Visible;
+            notes.RemoveAll(delegate(Note n) { return now - n.Born >= Life; });
+            if (playing && now >= nextNote && notes.Count < MostNotes)
+            {
+                nextNote = now + Gap();
+                notes.Add(new Note
+                {
+                    Glyph = Glyphs[random.Next(Glyphs.Length)],
+                    Ink = Colors[random.Next(Colors.Length)],
+                    X = Across * (0.28 + random.NextDouble() * 0.44),
+                    Sway = random.NextDouble() * Math.PI * 2,
+                    Born = now,
+                });
+            }
+            if (notes.Count == 0)
+            {
+                if (Visible) Hide();
+                return;
+            }
+            Location = new Point(her.Left + her.Width / 2 - Across / 2, her.Top - High / 2);
+            if (!Visible) Show();
+            Invalidate();
+        }
+        catch (Exception error)
+        {
+            tick.Stop();
+            Hide();
+            capri.Log("Floating Notes stopped: " + error.Message);
+        }
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        // Crisp edges on purpose: smoothing would blend into the see-through colour and leave a halo.
+        e.Graphics.TextRenderingHint = TextRenderingHint.SingleBitPerPixelGridFit;
+        double now = clock.Elapsed.TotalSeconds;
+        foreach (Note n in notes)
+        {
+            double age = now - n.Born;
+            float x = (float)(n.X + Math.Sin(age * 3 + n.Sway) * 12);
+            float y = (float)(High - 34 - age * Rise);
+            using (Brush ink = new SolidBrush(n.Ink)) e.Graphics.DrawString(n.Glyph, font, ink, x, y);
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) { tick.Dispose(); font.Dispose(); }
+        base.Dispose(disposing);
+    }
+}
+
+// ---- Options page (Quaisar_THM's shared toolkit) -------------------------------
+// An Options page under Mainframe > Mods, in her colours. Every value lives in
+// this mod's own Store, so it survives restarts and updates. Toggles and
+// numbers apply as you change them; text applies on Enter or when you click away.
+sealed class Opts
+{
+    static readonly Color Back = Color.FromArgb(16, 15, 8), Ink = Color.FromArgb(236, 236, 241),
+        Dim = Color.FromArgb(150, 146, 120), Yellow = Color.FromArgb(252, 239, 3),
+        Cyan = Color.FromArgb(5, 202, 237), Field = Color.FromArgb(30, 29, 14), Edge = Color.FromArgb(90, 86, 10);
+    const int Wide = 690, Right = 470;
+
+    delegate int Row(Control page, int y);
+    readonly ICapriHost host;
+    readonly List<Row> rows = new List<Row>();
+
+    public Opts(ICapriHost host, string title)
+    {
+        this.host = host;
+        host.Ui.SetOptions(title, Build);
+    }
+
+    // Reading values, with sane fallbacks for anything missing or out of range.
+    public bool Flag(string key, bool def) { try { return host.Store.Flag(key, def); } catch (Exception) { return def; } }
+    public double Num(string key, double def, double min, double max)
+    {
+        double v;
+        try { v = host.Store.Number(key, def); } catch (Exception) { v = def; }
+        return double.IsNaN(v) ? def : Math.Max(min, Math.Min(max, v));
+    }
+    public string Str(string key, string def)
+    {
+        try { string v = host.Store.Get(key, def); return v ?? def; } catch (Exception) { return def; }
+    }
+
+    public void Section(string title)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            System.Windows.Forms.Label l = Text(title.ToUpperInvariant(), 18, y + (y > 14 ? 10 : 0), Wide);
+            l.ForeColor = Cyan;
+            l.Font = new Font("Segoe UI Semibold", 9.5f);
+            p.Controls.Add(l);
+            return l.Bottom + 8;
+        });
+    }
+
+    public void Note(string text)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            System.Windows.Forms.Label l = Text(text, 18, y, Wide);
+            l.ForeColor = Dim;
+            l.Font = new Font("Segoe UI", 8.5f);
+            l.Height = TextRenderer.MeasureText(text, l.Font, new Size(Wide, 0), TextFormatFlags.WordBreak).Height + 4;
+            p.Controls.Add(l);
+            return l.Bottom + 8;
+        });
+    }
+
+    public void Toggle(string label, string key, bool def, Action<bool> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
+            Button off = Pill("OFF", Right + 50, y), on = Pill("ON", Right + 140, y);
+            MethodInvoker paint = delegate
+            {
+                bool v = Flag(key, def);
+                Lit(on, v);
+                Lit(off, !v);
+            };
+            off.Click += delegate { Save(key, false); paint(); Tell(changed, false); };
+            on.Click += delegate { Save(key, true); paint(); Tell(changed, true); };
+            paint();
+            p.Controls.Add(off);
+            p.Controls.Add(on);
+            return y + 42;
+        });
+    }
+
+    public void Number(string label, string key, double def, double min, double max, double step, int decimals, Action<double> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y + 7, Right - 30));
+            NumericUpDown box = new NumericUpDown
+            {
+                Left = Right + 50, Top = y + 2, Width = 170, DecimalPlaces = decimals,
+                Minimum = (decimal)min, Maximum = (decimal)max, Increment = (decimal)step,
+                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f), TextAlign = HorizontalAlignment.Center,
+            };
+            box.Value = (decimal)Num(key, def, min, max);
+            box.ValueChanged += delegate
+            {
+                double v = (double)box.Value;
+                try { host.Store.Set(key, v); } catch (Exception) { }
+                Tell(changed, v);
+            };
+            p.Controls.Add(box);
+            return y + 42;
+        });
+    }
+
+    public void Text(string label, string key, string def, Action<string> changed)
+    {
+        rows.Add(delegate(Control p, int y)
+        {
+            p.Controls.Add(Text(label, 18, y, Wide));
+            TextBox box = new TextBox
+            {
+                Left = 18, Top = y + 24, Width = Wide, Text = Str(key, def),
+                BackColor = Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10f),
+            };
+            string applied = box.Text;
+            MethodInvoker apply = delegate
+            {
+                if (box.Text == applied) return;
+                applied = box.Text;
+                try { host.Store.Set(key, applied); } catch (Exception) { }
+                Tell(changed, applied);
+            };
+            box.Leave += delegate { apply(); };
+            box.KeyDown += delegate(object s, KeyEventArgs e)
+            {
+                if (e.KeyCode != Keys.Enter) return;
+                e.SuppressKeyPress = true;
+                apply();
+            };
+            p.Controls.Add(box);
+            return box.Bottom + 12;
+        });
+    }
+
+    Control Build()
+    {
+        Panel page = new Panel { Width = Wide + 36, BackColor = Back, ForeColor = Ink, Font = new Font("Segoe UI", 9.5f) };
+        int y = 14;
+        foreach (Row r in rows) y = r(page, y);
+        page.Height = y + 10;
+        return page;
+    }
+
+    void Save(string key, bool v) { try { host.Store.Set(key, v); } catch (Exception) { } }
+
+    // A setting that fails to apply is logged, never thrown into her window.
+    void Tell<T>(Action<T> changed, T value)
+    {
+        if (changed == null) return;
+        try { changed(value); }
+        catch (Exception e) { try { host.Log("Options: " + e.Message); } catch (Exception) { } }
+    }
+
+    static System.Windows.Forms.Label Text(string text, int x, int y, int width)
+    {
+        return new System.Windows.Forms.Label { Text = text, Left = x, Top = y, Width = width, AutoSize = false, Height = 22, ForeColor = Ink, BackColor = Color.Transparent };
+    }
+
+    static Button Pill(string text, int x, int y)
+    {
+        Button b = new Button { Text = text, Left = x, Top = y, Width = 84, Height = 30, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Default, Font = new Font("Segoe UI Semibold", 9f) };
+        b.FlatAppearance.BorderColor = Edge;
+        return b;
+    }
+
+    static void Lit(Button b, bool lit)
+    {
+        b.BackColor = lit ? Yellow : Field;
+        b.ForeColor = lit ? Back : Ink;
+        b.FlatAppearance.BorderColor = lit ? Yellow : Edge;
+    }
+
+    // "a, b ,c" -> ["a","b","c"], blanks dropped.
+    public static List<string> Words(string list)
+    {
+        List<string> words = new List<string>();
+        foreach (string w in (list ?? "").Split(','))
+            if (w.Trim().Length > 0) words.Add(w.Trim());
+        return words;
+    }
+}
