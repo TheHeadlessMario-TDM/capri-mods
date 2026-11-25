@@ -32,6 +32,7 @@ public class PasteScreenshot : ICapriMod
     static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wide, string text);
 
     ICapriHost capri;
+    readonly object lifecycle = new object();
     System.Threading.Timer waiting;
     Form her;
     Control input;
@@ -55,7 +56,14 @@ public class PasteScreenshot : ICapriMod
         try { Prune(host.Folder, keepHours); }
         catch (Exception) { }
         // Her window may not exist yet this early, so keep trying.
-        waiting = new System.Threading.Timer(delegate { Attach(); }, null, 0, 500);
+        lock (lifecycle)
+        {
+            if (waiting != null) return;
+            System.Threading.Timer run = null;
+            run = new System.Threading.Timer(delegate { Attach(run); }, null, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
+            waiting = run;
+            run.Change(0, System.Threading.Timeout.Infinite);
+        }
     }
 
     public bool Heard(string words) { return false; }
@@ -64,15 +72,35 @@ public class PasteScreenshot : ICapriMod
     {
         try
         {
-            if (waiting != null) { waiting.Dispose(); waiting = null; }
-            Form f = her;
-            if (f == null || f.IsDisposed || input == null || handler == null) return;
-            f.BeginInvoke((MethodInvoker)delegate
+            Form f;
+            Control target;
+            KeyEventHandler oldHandler;
+            PreviewKeyDownEventHandler oldEnter;
+            lock (lifecycle)
             {
-                input.KeyDown -= handler;
-                if (enter != null) input.PreviewKeyDown -= enter;
-                Hint(NormalHint);
-            });
+                if (waiting != null) { waiting.Dispose(); waiting = null; }
+                f = her;
+                target = input;
+                oldHandler = handler;
+                oldEnter = enter;
+                her = null;
+                input = null;
+                handler = null;
+                enter = null;
+                attached = null;
+            }
+            if (f == null || f.IsDisposed || target == null) return;
+            MethodInvoker detach = delegate
+            {
+                target.KeyDown -= oldHandler;
+                target.PreviewKeyDown -= oldEnter;
+                lock (lifecycle)
+                {
+                    if (target != input && target.IsHandleCreated)
+                        SendMessage(target.Handle, SetHint, new IntPtr(1), NormalHint);
+                }
+            };
+            if (f.InvokeRequired) f.BeginInvoke(detach); else detach();
         }
         catch (Exception e)
         {
@@ -80,30 +108,48 @@ public class PasteScreenshot : ICapriMod
         }
     }
 
-    void Attach()
+    void Attach(System.Threading.Timer run)
     {
-        Form f = Her();
-        if (f == null || waiting == null) return;
-        waiting.Dispose();
-        waiting = null;
-        her = f;
-        f.BeginInvoke((MethodInvoker)delegate
+        try
         {
-            // On her window's thread, where an error would take her down.
-            try
+            lock (lifecycle)
             {
-                object typer = f.GetType().GetField("typer", Inst).GetValue(f);
-                input = (Control)typer.GetType().GetField("input", Inst).GetValue(typer);
-                handler = OnKey;
-                input.KeyDown += handler;
-                // Preview runs before her own Enter handling empties the box,
-                // so it can still tell whether anything was typed.
-                enter = OnEnter;
-                input.PreviewKeyDown += enter;
-                capri.Log("Paste Pictures: Ctrl+V in her Type box attaches the picture.");
+                if (waiting != run) return;
+                Form f = Her();
+                if (f == null)
+                {
+                    run.Change(500, System.Threading.Timeout.Infinite);
+                    return;
+                }
+                f.BeginInvoke((MethodInvoker)delegate
+                {
+                    lock (lifecycle)
+                    {
+                        if (waiting != run || f.IsDisposed) return;
+                        try
+                        {
+                            object typer = f.GetType().GetField("typer", Inst).GetValue(f);
+                            input = (Control)typer.GetType().GetField("input", Inst).GetValue(typer);
+                            her = f;
+                            handler = delegate(object sender, KeyEventArgs key)
+                            {
+                                lock (lifecycle) { if (waiting == run) OnKey(sender, key); }
+                            };
+                            enter = delegate(object sender, PreviewKeyDownEventArgs key)
+                            {
+                                lock (lifecycle) { if (waiting == run) OnEnter(sender, key); }
+                            };
+                            input.KeyDown += handler;
+                            // Preview runs before her own Enter handling empties the box.
+                            input.PreviewKeyDown += enter;
+                            capri.Log("Paste Pictures: Ctrl+V in her Type box attaches the picture.");
+                        }
+                        catch (Exception e) { capri.Log("Paste Pictures could not start: " + e.Message); }
+                    }
+                });
             }
-            catch (Exception e) { capri.Log("Paste Pictures could not start: " + e.Message); }
-        });
+        }
+        catch (Exception e) { capri.Log("Paste Pictures could not start: " + e.Message); }
     }
 
     void OnKey(object sender, KeyEventArgs key)
