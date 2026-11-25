@@ -602,9 +602,10 @@ public class CapriInternalBrowser : ICapriMod
     {
       now.Post(delegate
       {
-        if (page != null || address != null) now.OpenTab(page, address, true);
+        now.Acting = Working;
+        try { if (page != null || address != null) now.OpenTab(page, address, true); } finally { now.Acting = false; }
         Form sheet = now.FindForm();
-        if (sheet != null)
+        if (sheet != null && !quiet)
         {
           if (sheet.WindowState == FormWindowState.Minimized) sheet.WindowState = FormWindowState.Normal;
           sheet.Activate();
@@ -638,7 +639,7 @@ public class CapriInternalBrowser : ICapriMod
   // Her own page scripts: number what can be used, click, type, press Enter.
   const string Flash = "var o=e.style.outline,f=e.style.outlineOffset;e.style.outline='3px solid #ff2e88';e.style.outlineOffset='2px';setTimeout(function(){e.style.outline=o;e.style.outlineOffset=f},1400);";
   // TikTok's videos are in a list only it scrolls: the one below comes into view.
-  const string NextTok = "(/(^|[.])tiktok[.]com$/.test(location.hostname)&&[].some.call(document.querySelectorAll('article'),function(e){if(e.getBoundingClientRect().top<innerHeight/2)return false;e.scrollIntoView({behavior:'smooth'});return true;}))";
+  const string NextTok = "(/(^|[.])tiktok[.]com$/.test(location.hostname)&&[].some.call(document.querySelectorAll('article'),function(e){if(e.getBoundingClientRect().top<innerHeight/2)return false;e.scrollIntoView({behavior:document.hidden?'auto':'smooth'});return true;}))";
   const string ItemsScript = "(function(){var out=[],n=0;document.querySelectorAll('[data-capri]').forEach(function(e){e.removeAttribute('data-capri')});"
     + "var all=document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,[role=button],[role=link],[role=tab],[role=menuitem],[contenteditable=true],summary');"
     + "for(var i=0;i<all.length&&n<80;i++){var e=all[i],r=e.getBoundingClientRect();if(r.width<2||r.height<2||r.bottom<0||r.top>innerHeight*2.5)continue;var s=getComputedStyle(e);if(s.visibility=='hidden'||s.display=='none')continue;"
@@ -1772,7 +1773,13 @@ public class CapriInternalBrowser : ICapriMod
   int jobs;                       // her browser jobs running now (picking a video), so Esc counts the whole time
   static volatile bool glideStop;  // Esc: a mouse glide in progress stops before it clicks
   [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
-  static bool EscDown() { return (GetAsyncKeyState(0x1B) & 0x8000) != 0; }
+  static volatile bool quiet;
+  static bool EscDown()
+  {
+    if ((GetAsyncKeyState(0x1B) & 0x8000) == 0) return false;
+    int pid;
+    return !quiet || (Browser.GetWindowThreadProcessId(Browser.GetForegroundWindow(), out pid) != 0 && pid == Process.GetCurrentProcess().Id);
+  }
 
   // Her thinking card in Capri Browser: what she's on (null hides it), and step of steps (0 when unknown).
   void ShowThinking(string doing, int step = 0, int steps = 0) { InBrowser(b => { b.Working(doing, step, steps); return null; }); }
@@ -1824,7 +1831,7 @@ public class CapriInternalBrowser : ICapriMod
   {
     if (Halted) return;
     glideStop = false;
-    if (!Flag("control", true)) return;
+    if (quiet || !Flag("control", true)) return;
     InBrowser(b =>
     {
       Form form = b.FindForm();
@@ -1883,6 +1890,7 @@ public class CapriInternalBrowser : ICapriMod
       OpenBrowser(null, to);
       Settle(true);
       Controlling();
+      if (Working) InBrowser(n => { n.StartWork(); return null; });
       return (to == null ? "Capri Browser is up on their screen." : "Opened " + to + " in Capri Browser on their screen.") + Here();
     }
     switch (verb)
@@ -1961,6 +1969,7 @@ public class CapriInternalBrowser : ICapriMod
         got = OnPage("(function(q){return window.find(q,false,false,true)?'found':'none';})(" + Quote(rest) + ")", out why);
         return got == null ? why : got == "found" ? "Found \"" + rest + "\" and scrolled to it." : "\"" + rest + "\" isn't on the page.";
       case "fullscreen":
+        if (quiet) return "skipped full screen (it needs your mouse, and Don't use my mouse is on)";
         got = OnPage("(function(){if(document.fullscreenElement){document.exitFullscreen();return 'out';}var v=document.querySelector('video');if(!v)return 'none';var p=v.closest('#movie_player,.html5-video-player,[data-a-target=video-player],.video-player')||v;p.setAttribute('tabindex','-1');p.focus();return 'video';})()", out why);
         if (got == "out") return "Out of full screen.";
         if (got == "video")
@@ -2276,6 +2285,7 @@ public class CapriInternalBrowser : ICapriMod
   // False when the mouse is theirs right now, so nothing was moved or clicked.
   static bool Glide(Point to, bool click)
   {
+    if (quiet) return false;
     Point from = Cursor.Position;
     for (int i = 1; i <= 36; i++)
     {
@@ -2303,12 +2313,12 @@ public class CapriInternalBrowser : ICapriMod
     string[] p = (OnPage(spot, out why) ?? "").Split(',');
     int x, y;
     if (p.Length < 2 || !int.TryParse(p[0], out x) || !int.TryParse(p[1], out y)) return false;
-    if (!click && !Flag("mouse", true)) return true;
+    if (!click && (quiet || !Flag("mouse", true))) return true;
     bool shown = true;
     InBrowser(b => { Form form = b.FindForm(); shown = form != null && form.Visible && form.WindowState != FormWindowState.Minimized; return null; });
     if (!shown && !click) return true;
     Controlling();
-    if (click) ShowBrowser();
+    if (click && !quiet) ShowBrowser();
     Point screen = Point.Empty;
     if (InBrowser(b => { screen = b.OnScreen(x, y); return null; }) != null) return false;
     // The mouse is theirs right now: she presses it on the page itself.
@@ -4941,7 +4951,7 @@ public class CapriInternalBrowser : ICapriMod
   // Before she does it, the mouse goes there (the action itself still happens on the page, so nothing's pressed twice).
   void PointFor(string verb, string rest)
   {
-    if (!Flag("mouse", true)) return;
+    if (quiet || !Flag("mouse", true)) return;
     string spot = null;
     switch (verb)
     {
@@ -5235,7 +5245,18 @@ public class CapriInternalBrowser : ICapriMod
     capri.Say("Tested " + job.Trigger + ", choom: " + good + " of " + log.Count + (log.Count == 1 ? " step" : " steps") + " worked." + (noThought ? " My brain didn't answer on some, so try another model in Capri Mainframe." : ""));
   }
 
-  internal void RunJob(Job job, int from, List<string[]> log = null)
+  internal void RunJob(Job job, int from, List<string[]> log = null, object at = null)
+  {
+    if (at != null) InBrowser(b => { b.Back(at); return null; });
+    if (from == 0) jobSite = job.Link;
+    EscJob(delegate
+    {
+      quiet = Flag("jobquiet", false);
+      try { JobSteps(job, from, log); } finally { quiet = false; }
+    });
+  }
+
+  void JobSteps(Job job, int from, List<string[]> log)
   {
     try
     {
@@ -5246,6 +5267,7 @@ public class CapriInternalBrowser : ICapriMod
         Browser b = open;
         if (b == null || b.IsDisposed) OpenBrowser(null, job.Link); else InBrowser(now => { now.OpenTab(null, job.Link, true); return null; });
         Settle(true);
+        InBrowser(now => { now.StartWork(); return null; });
       }
       var pieces = new List<string>();
       foreach (string line in job.Steps.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries)) pieces.AddRange(Pieces(line));
@@ -5279,7 +5301,9 @@ public class CapriInternalBrowser : ICapriMod
           int carry = i + 1;
           Func<string> act;
           lock (gate) act = pend;
-          if (act != null) lock (gate) pend = delegate { string done = act(); Behind(delegate { Thread.Sleep(1200); RunJob(job, carry); }); return done; };
+          object at = null;
+          InBrowser(b => { at = b.WorkTab; return null; });
+          if (act != null) lock (gate) pend = delegate { string done = null; InBrowser(b => { b.Back(at); return null; }); EscJob(delegate { done = act(); }); Behind(delegate { Thread.Sleep(1200); RunJob(job, carry, null, at); }); return done; };
           ShowThinking(null);
           capri.Say(said.Substring(4));
           return;
@@ -5416,7 +5440,7 @@ public class CapriInternalBrowser : ICapriMod
     if (JobFor(step) == null && !Yes.IsMatch(step) && !No.IsMatch(step) && Heard(step))
     {
       Thread.Sleep(1500);
-      for (int t = 0; t < 600 && Thread.VolatileRead(ref jobs) > 0 && !stopped && !Halted; t++) Thread.Sleep(200);
+      for (int t = 0; t < 600 && Thread.VolatileRead(ref jobs) > 1 && !stopped && !Halted; t++) Thread.Sleep(200);
       return null;
     }
     // Their own words: her brain says which step they meant, and she does that.
@@ -6412,12 +6436,15 @@ public class CapriInternalBrowser : ICapriMod
     internal Tab WorkTab;
     internal bool Acting;
     Tab Work { get { return mod.Working && WorkTab != null && tabs.Contains(WorkTab) ? WorkTab : tab; } }
+    internal void Back(object at) { WorkTab = at as Tab; }
     internal void StartWork() { if (WorkTab == null || !tabs.Contains(WorkTab)) WorkTab = tab; }
 
     void Select(Tab t)
     {
       if (t == null) return;
+      bool away = CapriInternalBrowser.quiet && Acting && mod.Working && WorkTab != null && tab != WorkTab && tabs.Contains(WorkTab);
       if (Acting) WorkTab = t;
+      if (away && tab != null && tabs.Contains(tab)) { CapriInternalBrowser.workAway = t != tab; return; }
       CapriInternalBrowser.workAway = mod.Working && WorkTab != null && tabs.Contains(WorkTab) && WorkTab != t;
       if (pwCard != null && pwCardTab != t) ClosePwCard();
       Tab was = tab;
@@ -8955,9 +8982,9 @@ public class CapriInternalBrowser : ICapriMod
 
     // Game mode by itself (Settings, off at first): on while a full-screen window that isn't a browser, a video player or Capri is in front, off
     // again a little after it's gone.
-    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr w, out Edges r);
-    [DllImport("user32.dll")] private static extern int GetWindowThreadProcessId(IntPtr w, out int pid);
+    [DllImport("user32.dll")] internal static extern int GetWindowThreadProcessId(IntPtr w, out int pid);
     struct Edges { public int Left, Top, Right, Bottom; }
     bool autoGame, autoSaid;
     int autoOff;
@@ -10537,7 +10564,8 @@ public class CapriInternalBrowser : ICapriMod
       List<Job> jobs = mod.Jobs();
       html.Append("<div class='st jx'><div class='main'><header class='jh'><h1 data-t='CUSTOM JOBS'>CUSTOM JOBS</h1><p>")
         .Append(Esc(JobGuides.ContainsKey(look.Lang) ? JobGuides[look.Lang] : "Make your own commands. Say the words in quotes and Capri does the steps."))
-        .Append("</p><div class='jn'><b>").Append(jobs.Count).Append("</b> of 30 jobs").Append(jobs.Count < 30 ? "<button class='bt m' onclick='N()'>+ New job</button>" : "").Append("</div></header>");
+        .Append("</p><div class='jn'><b>").Append(jobs.Count).Append("</b> of 30 jobs").Append(jobs.Count < 30 ? "<button class='bt m' onclick='N()'>+ New job</button>" : "")
+        .Append("<button class='bt' title=\"She works on the page itself and leaves your mouse, keyboard and other tabs to you. Full screen steps are skipped.\" onclick=\"location.href='").Append(Own).Append("jobs?a=quiet'\">Don't use my mouse: ").Append(Flag("jobquiet", false) ? "ON" : "OFF").Append("</button></div></header>");
       html.Append("<details class='card guide'").Append(jobs.Count == 0 ? " open" : "").Append("><summary><h2>HOW TO MAKE ONE <span>&gt;</span></h2></summary><ol>")
         .Append(Line("jobshow", "<li>Write what you'll say in quotes, then one step a line: <code>play</code>, <code>full screen</code>, <code>volume 40</code>.</li></ol>")).Append("</details>");
       if (!string.IsNullOrEmpty(jobNote)) html.Append("<div class='card'><p class='warn'>").Append(Esc(jobNote)).Append("</p></div>");
@@ -11010,11 +11038,11 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
         case "tabs": return TabList();
         case "go":
           if (rest.Length == 0) return "Say where to go.";
-          if (t != null && t != tab) { t.Viewer.Go(Where(rest)); return "Going to " + rest + "."; }
+          if (t != null && t != tab) { Go(t, Where(rest)); return "Going to " + rest + "."; }
           address.Text = rest;
           Visit();
           return "Going to " + rest + ".";
-        case "new": NewTab(); return "Opened a new tab.";
+        case "new": if (CapriInternalBrowser.quiet) OpenTab(null, null, true); else NewTab(); return "Opened a new tab.";
         case "switch":
           t = Numbered(rest);
           if (t == null) return "There's no tab " + rest + ". " + TabList();
@@ -11044,7 +11072,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
         case "translate": if (t == null) return "There's no tab open."; Translate(t); return "Translating the page.";
         case "fullscreen": SetFullScreen(!full); return full ? "Full screen." : "Out of full screen.";
         case "show":
-          if (form != null) { if (form.WindowState == FormWindowState.Minimized) form.WindowState = FormWindowState.Normal; form.Activate(); }
+          if (form != null && !quiet) { if (form.WindowState == FormWindowState.Minimized) form.WindowState = FormWindowState.Normal; form.Activate(); }
           return "Capri Browser is up front.";
         case "hide": if (form != null) form.WindowState = FormWindowState.Minimized; return "Tucked Capri Browser away.";
       }
@@ -14269,6 +14297,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       { "watchalong", "Watch-along reactions", "0", "capri" },
       { "watchoften", "More watch-along reactions", "0", "capri" },
       { "browserreact", "Browser reactions", "0", "capri" },
+      { "jobquiet", "Don't use my mouse in custom jobs", "0", "capri" },
       { "control", "Takeover animation", "1", "capri" },
       { "autofull", "Full screen for videos Capri opens", "1", "video" },
       { "react", "Comment when a video ends", "1", "notify" },
@@ -15240,6 +15269,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
           });
           return;
         }
+        else if (a == "quiet") { if (Host != null) Host.Store.Set("opt-jobquiet", Flag("jobquiet", false) ? "0" : "1"); }
         else if (a == "del") { mod.DropJob(ji); jobNote = null; draftAt = -1; }
         else if (a == "run" || a == "test") { List<Job> jobs = mod.Jobs(); if (ji >= 0 && ji < jobs.Count) { Job run = jobs[ji]; mod.Tell((a == "test" ? "Testing " : "Running ") + run.Trigger + ", choom."); Behind(delegate { mod.RunJob(run, 0, a == "test" ? new List<string[]>() : null); }); } return; }
         ShowReader(t);
