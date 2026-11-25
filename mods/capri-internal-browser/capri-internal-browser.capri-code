@@ -637,6 +637,8 @@ public class CapriInternalBrowser : ICapriMod
 
   // Her own page scripts: number what can be used, click, type, press Enter.
   const string Flash = "var o=e.style.outline,f=e.style.outlineOffset;e.style.outline='3px solid #ff2e88';e.style.outlineOffset='2px';setTimeout(function(){e.style.outline=o;e.style.outlineOffset=f},1400);";
+  // TikTok's videos are in a list only it scrolls: the one below comes into view.
+  const string NextTok = "(/(^|[.])tiktok[.]com$/.test(location.hostname)&&[].some.call(document.querySelectorAll('article'),function(e){if(e.getBoundingClientRect().top<innerHeight/2)return false;e.scrollIntoView({behavior:'smooth'});return true;}))";
   const string ItemsScript = "(function(){var out=[],n=0;document.querySelectorAll('[data-capri]').forEach(function(e){e.removeAttribute('data-capri')});"
     + "var all=document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,[role=button],[role=link],[role=tab],[role=menuitem],[contenteditable=true],summary');"
     + "for(var i=0;i<all.length&&n<80;i++){var e=all[i],r=e.getBoundingClientRect();if(r.width<2||r.height<2||r.bottom<0||r.top>innerHeight*2.5)continue;var s=getComputedStyle(e);if(s.visibility=='hidden'||s.display=='none')continue;"
@@ -1952,7 +1954,7 @@ public class CapriInternalBrowser : ICapriMod
         Settle(false);
         return "Pressed Enter on it." + Here();
       case "scroll":
-        string where = rest.StartsWith("up") ? "window.scrollBy(0,-innerHeight*.8)" : rest.StartsWith("top") ? "window.scrollTo(0,0)" : rest.StartsWith("bottom") ? "window.scrollTo(0,document.documentElement.scrollHeight)" : "window.scrollBy(0,innerHeight*.8)";
+        string where = rest.StartsWith("up") ? "window.scrollBy(0,-innerHeight*.8)" : rest.StartsWith("top") ? "window.scrollTo(0,0)" : rest.StartsWith("bottom") ? "window.scrollTo(0,document.documentElement.scrollHeight)" : "if(!" + NextTok + ")window.scrollBy(0,innerHeight*.8)";
         got = OnPage("(function(){" + where + ";return 'ok';})()", out why);
         return got == null ? why : "Scrolled " + (rest.Length == 0 ? "down" : rest) + ".";
       case "find":
@@ -1971,7 +1973,7 @@ public class CapriInternalBrowser : ICapriMod
         }
         return NoVideo;
       case "speed": case "skip": case "rewind": case "seek": case "volume": case "loop": case "next": case "captions": case "subtitles":
-        got = OnPage("(function(k,a){var v=null,s=0;document.querySelectorAll('video').forEach(function(e){var z=e.clientWidth*e.clientHeight;if(z>s){s=z;v=e;}});if(!v)return 'none';var n=parseFloat(a);var t=/([0-9]+):([0-9]+)(?::([0-9]+))?/.exec(a);function c(q){var b=document.querySelector(q);if(b){b.click();return 1;}}switch(k){case 'speed':v.playbackRate=isNaN(n)?1:Math.max(.25,Math.min(4,n));return 'Speed '+v.playbackRate+'x.';case 'rewind':n=-(isNaN(n)?10:Math.abs(n));case 'skip':v.currentTime+=isNaN(n)?10:n;return 'Now at '+Math.floor(v.currentTime/60)+':'+('0'+Math.floor(v.currentTime%60)).slice(-2)+'.';case 'seek':v.currentTime=t?(t[3]?(+t[1])*3600+(+t[2])*60+(+t[3]):(+t[1])*60+(+t[2])):(n||0);return 'Jumped there.';case 'volume':if(!isNaN(n)){v.muted=false;v.volume=Math.max(0,Math.min(1,/^[+-]/.test(a)?v.volume+n/100:n>1?n/100:n));}return 'Volume '+Math.round(v.volume*100)+'%.';case 'loop':v.loop=!v.loop;return v.loop?'Looping it.':'Not looping any more.';case 'next':return c('.ytp-next-button,[aria-label^=Next i]')?'Next video.':'There is no next button here.';default:return c('.ytp-subtitles-button,[aria-label*=caption i],[aria-label*=subtitle i]')?'Toggled captions.':'No captions button here.';}})(" + Quote(verb) + "," + Quote(rest) + ")", out why);
+        got = OnPage("(function(k,a){var v=null,s=0;document.querySelectorAll('video').forEach(function(e){var z=e.clientWidth*e.clientHeight;if(z>s){s=z;v=e;}});if(!v)return 'none';var n=parseFloat(a);var t=/([0-9]+):([0-9]+)(?::([0-9]+))?/.exec(a);function c(q){var b=document.querySelector(q);if(b){b.click();return 1;}}switch(k){case 'speed':v.playbackRate=isNaN(n)?1:Math.max(.25,Math.min(4,n));return 'Speed '+v.playbackRate+'x.';case 'rewind':n=-(isNaN(n)?10:Math.abs(n));case 'skip':v.currentTime+=isNaN(n)?10:n;return 'Now at '+Math.floor(v.currentTime/60)+':'+('0'+Math.floor(v.currentTime%60)).slice(-2)+'.';case 'seek':v.currentTime=t?(t[3]?(+t[1])*3600+(+t[2])*60+(+t[3]):(+t[1])*60+(+t[2])):(n||0);return 'Jumped there.';case 'volume':if(!isNaN(n)){v.muted=false;v.volume=Math.max(0,Math.min(1,/^[+-]/.test(a)?v.volume+n/100:n>1?n/100:n));}return 'Volume '+Math.round(v.volume*100)+'%.';case 'loop':v.loop=!v.loop;return v.loop?'Looping it.':'Not looping any more.';case 'next':if(" + NextTok + ")return 'Next video.';return c('.ytp-next-button,[aria-label^=Next i]')?'Next video.':'There is no next button here.';default:return c('.ytp-subtitles-button,[aria-label*=caption i],[aria-label*=subtitle i]')?'Toggled captions.':'No captions button here.';}})(" + Quote(verb) + "," + Quote(rest) + ")", out why);
         return got == null ? why : got == "none" ? "There's no video on this page." : got;
       case "cheaper": case "compare": case "prices":
         if (rest.Length == 0) { FindCheaper(); return "Started: you've asked them to point at the product and you'll tell them what you find yourself. Say nothing more about it now."; }
@@ -5249,11 +5251,19 @@ public class CapriInternalBrowser : ICapriMod
       foreach (string line in job.Steps.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries)) pieces.AddRange(Pieces(line));
       string[] steps = Joined(pieces).ToArray();
       var missed = new List<string>();
-      int i;
+      int i, laps = 1;
       for (i = from; i < steps.Length && !stopped && !Halted; i++)
       {
         string step = Regex.Replace(steps[i].Trim(), @"^(?:then|and|and\s+then|next|after\s+that)[,\s]+", "", Plain).Trim().TrimEnd('.');
         string next = i + 1 < steps.Length ? steps[i + 1].Trim() : "";
+        // "repeat 20 times": all the steps before it again, 100 times at most (once in a test). Esc stops it.
+        Match again = Regex.Match(step, @"^(?:repeat|loop|do)(?:\s+(?:it|that|this|everything|all\s+(?:of\s+)?(?:it|that)|the\s+steps|the\s+job))?(?:\s+again)?\s+(\d{1,3})\s*(?:x|times?)$", Plain);
+        if (again.Success)
+        {
+          if (log != null) log.Add(StepResult(step, null));
+          else if (i > 0 && laps < Math.Min(100, int.Parse(again.Groups[1].Value))) { laps++; i = -1; }
+          continue;
+        }
         stepAfter = next;
         wholeJob = string.Join(" / ", steps);
         Match notes = Regex.Match(next, @"^(?:then\s+)?(?:add|put|save|write)\s+(?:it|that|this|them)?\s*(?:to|in|into)\s+(?:my\s+|the\s+)?(?<book>[\w' -]*?)\s*notes?(?:book)?$", Plain);
@@ -5457,7 +5467,7 @@ public class CapriInternalBrowser : ICapriMod
   // The steps her AI can turn a job's words into: the step chips, and these.
   static string StepForms()
   {
-    return string.Join(" | ", Browser.JobChips) + " | open <site> | open any website (no site named) | click any <thing> (picks one at random, like click any game) | open the website (the page that's open) | find <words> (on the page) | summarise to <name> notes | screenshot to <name> notes | put it in <name> notes | click <words on the page> | type <words> in the <box> | search <words> | find me <thing> | play <song or video> | scroll up | go back | new tab | close this tab | translate this page | remind me in <time> to <thing> | summarise <part of the page> | ask <question>";
+    return string.Join(" | ", Browser.JobChips) + " | repeat <number> times (last: does all the steps again) | open <site> | open any website (no site named) | click any <thing> (picks one at random, like click any game) | open the website (the page that's open) | find <words> (on the page) | summarise to <name> notes | screenshot to <name> notes | put it in <name> notes | click <words on the page> | type <words> in the <box> | search <words> | find me <thing> | play <song or video> | scroll up | go back | new tab | close this tab | translate this page | remind me in <time> to <thing> | summarise <part of the page> | ask <question>";
   }
 
   // The step after the one running in a job ("" for the last).
@@ -10515,7 +10525,7 @@ public class CapriInternalBrowser : ICapriMod
     }
 
     // Steps you can click to add on the Custom jobs page.
-    internal static readonly string[] JobChips = { "open youtube.com", "open any website", "play", "pause", "full screen", "volume 40", "speed 1.5", "next video", "skip 2 minutes", "click Shuffle", "scroll down", "search lofi beats", "type hello in the search box", "press enter", "find me a lofi playlist", "new tab", "summarise", "check the comments", "read it out", "screenshot to notes", "remind me in 20 minutes to stretch", "wait 5", "wait for it to load", "ask Ready?", "say Let's go, choom" };
+    internal static readonly string[] JobChips = { "open youtube.com", "open any website", "play", "pause", "full screen", "volume 40", "speed 1.5", "next video", "skip 2 minutes", "click Shuffle", "scroll down", "search lofi beats", "type hello in the search box", "press enter", "find me a lofi playlist", "new tab", "summarise", "check the comments", "read it out", "screenshot to notes", "remind me in 20 minutes to stretch", "wait 5", "repeat 10 times", "wait for it to load", "ask Ready?", "say Let's go, choom" };
 
     // Custom jobs: a header, how to word one (folded away once you've got some), each of theirs as a card, and a new one.
     string JobsPage()
