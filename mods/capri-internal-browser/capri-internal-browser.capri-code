@@ -4281,9 +4281,9 @@ public class CapriInternalBrowser : ICapriMod
 	};
 
 	// Browser addons, pinned to one commit. Every file must match its SHA-256 here, or it isn't used.
-	const string AddonsCommit = "3f3fc0ecc2cbc649bd6d046f49c5d10ed15d3111";
+	const string AddonsCommit = "12490a22f75359ae974746a7536cb8df380d88ee";
 	const string Addons = "https://raw.githubusercontent.com/tob7as/Browser-addons/" + AddonsCommit + "/";
-	const string AddonHashes = "data/adblock.txt=f38d348c8396b5680bf97d38678abd9e2d200a8438deb5edf3c7e2c86fc96346;data/commands.txt=e1d3e5bcbed9ef9ca4bef7f0fff6b63f4399f3eeb0e91692a19f240f79c8db4b;data/lists.txt=559b71af6b4a62c354e7ec6eba3d98fcfea95d8dcbcbe11561b6b898b3771bad;games.txt=72379fea00637a9efe61cb52b285a136368b7f2556da57fe7e086734450ae891;games/anime.html=454cdb79b13b338449f0a9bc21bb630d2757273565721798ecfd2422828d31ce;games/celebs.html=ea4604ec23d2970969637b0e0bcc583c365329418149f980b7be74f3c5e8b2bf;games/daily.html=8fe939bee76b10c73f6f1ee687302bf69332aa2043e4c1a8f98aab304c3d1ec2;games/freegames.html=dd34dc788b27df8e0b68d42573e12d8a623b20d53f648be28b1a9a15bb33641d;games/guess.txt=1bca3689c63ed41b0dca427081b6358889cd576e7174240e9da781ba681054a0;games/memory.html=45d48eb7f452a205f86c1d32458036cd7995e931cf62d9b8163ee7750f5436bb;games/reaction.html=4194adf2ee79863a8c2f59aac8db72ee97689c037146c9dd8fdf8bcf077dff2f;games/roulette.txt=8fe6d057f1fc387ae0e6992f33b9766baaa903fb5cb278069daae254fc487eee;games/snake.html=0df0872c916664c5cc452eb5e70153d6b25fda9efb02d0e44ea50023e36123fd;games/typing.html=f89ec2cfbbfcbca6a7e913a1e8b30b5075745d043c620c5e273c85a11d6eab49;games/wiki.txt=a237f5f75227a6d1a5a70e70ca732fa7a032f06a18184207c8b9483aa6406cdf;help.txt=0d06f49cf5d9a36bec127e1e67a42ed96d60bfa23c2776eb15233baac3435173;help/ar.txt=4914623d662f0b222cb781d653289df6a57392716aa7e0f3e5a180c81df80d66;help/bn.txt=a7cd0067a3652c6a5327880550e3e3c3545c41c1ee939b948d292137e6a4cdb6;help/de.txt=a32c62ee9133c377f13dae70e3eae4a8dce03071c05db834494d67a4132bc0a3;help/es.txt=77cdb74690f8ba05723a83001d5628a635bc1ce4771e67aabd0662b134a59e16;help/fil.txt=1cfd0c226cb0dc31a8cb284ede440148879533cf1766897dd3b5fbfbfb411185;help/fr.txt=fcca0c1e9e51c3e14c1aefbf73d6404378c743c403466d06a49572a8926057e9;help/hi.txt=d91a3b3d409c5ff567393fa882e3bc9e7da6b74712f3a807deda55f76a365d1b;help/id.txt=4fdc0b2f0760369abe3118872acfbafe0487122db3854a013aef2496e788e67a;help/it.txt=49a20f2139ad74a8546ced32151efdd4be1288b0b80942e742f67df0c6b20d29;help/ja.txt=b6a36ae1d3acb9b7eee608d2319167272f961867cba51bf58e8bbe18d796d68e;help/ko.txt=c4a8e6be7b747bb49c7ac4bc23f816bc776198b6eeef70af4c3fe794ee639f71;help/nl.txt=30792ec2e67a5545ab22c06c2bd602d8eefcdbac956c9baabc5fd32ded258374;help/pl.txt=06023f5466c93b841ab156fe4785cb3f20ff343b118bf63e9e0becfede232618;help/pt.txt=fc9c2c07380ac0b2ea1989653fd6bde06c02497f376399fb37fa255af61ff595;help/ru.txt=889ac1260ca4168396efc2a8b195a468fbe033ed94edfbe89789cf66d428fa18;help/sv.txt=241071f376140f19cbcfba0343214d747fb4bab085503a7bc3b0a00dc5155e0a;help/th.txt=574bb8a137d4ce5b2c3bb76f8b4dd7b7cb4fa47f8d1abad35510a8f6c504693c;help/tr.txt=e6f42478904e93321a9c6bdda0cddfac2f83e8bba91556db77a9622ab2df6100;help/uk.txt=575b67faecabc31568a1bec9bacd791c9de226629bd3ca8e1289b3e2cfcca63e;help/vi.txt=c4e07bcff348ad94db67e7d1d4e40b22488f28aa3040c2928eac7da95da90bac;help/zh-hans.txt=3832be4515798185f48c4be76724de6518a4bcdf5d14ed18d46911b4b38d7050;help/zh-hant.txt=3feb901a0fe9eb9088b453c5eda0dacc623a6c053ccbaea62ebe7203b6aa4bc5;languages.txt=e7a6d0a8e6477ca3ec0fac8bbee7715340b1b7c213b4b1fcb1b44156d97eca6b;pages/guess.js=8d451ce04fc6aa5cca8352702d3337e01bc17d8cf28def5f3dbbff2013e82bf9;pages/her.html=dfbae80d4e66b8b07d717279c521f866287e551fa0ff4bea04ae508f3c6bdeb0;pages/home.css=c86f0bd138d3f9e7317872eb44522f35c7bc51b76bd796e4c254c5e1305da645;pages/pages.css=f30510042634eb27310b1baa40575f0dff6696d24acb24795fabf4c84436681e;pages/race-clock.js=f440b43e32b7c760aefcf8a065f3c59c44da5688d19970e10dfc3b297c04c23d;pages/room.txt=7af0e00c323673cb7d708350af38a68da401e1d9e5af4a9d64d3fab469e970e8;pages/welcome.html=a2b6d38e3343c420c6ff17ed6d1ec00eadf505d7bcbc7cfc3fba6a58d0416a99;settings.css=b1b05b20bc210385de5306bc2b7ff99f441b41fb328d0cd0d498be10b4c94cf8;whats-new.txt=175f68e469d19128adc6b05101e019b6c46770f92bc580cafab41a2c17ad88aa";
+	const string AddonHashes = "data/adblock.txt=f38d348c8396b5680bf97d38678abd9e2d200a8438deb5edf3c7e2c86fc96346;data/commands.txt=e1d3e5bcbed9ef9ca4bef7f0fff6b63f4399f3eeb0e91692a19f240f79c8db4b;data/lists.txt=559b71af6b4a62c354e7ec6eba3d98fcfea95d8dcbcbe11561b6b898b3771bad;games.txt=72379fea00637a9efe61cb52b285a136368b7f2556da57fe7e086734450ae891;games/anime.html=454cdb79b13b338449f0a9bc21bb630d2757273565721798ecfd2422828d31ce;games/celebs.html=ea4604ec23d2970969637b0e0bcc583c365329418149f980b7be74f3c5e8b2bf;games/daily.html=8fe939bee76b10c73f6f1ee687302bf69332aa2043e4c1a8f98aab304c3d1ec2;games/freegames.html=dd34dc788b27df8e0b68d42573e12d8a623b20d53f648be28b1a9a15bb33641d;games/guess.txt=1bca3689c63ed41b0dca427081b6358889cd576e7174240e9da781ba681054a0;games/memory.html=45d48eb7f452a205f86c1d32458036cd7995e931cf62d9b8163ee7750f5436bb;games/reaction.html=4194adf2ee79863a8c2f59aac8db72ee97689c037146c9dd8fdf8bcf077dff2f;games/roulette.txt=8fe6d057f1fc387ae0e6992f33b9766baaa903fb5cb278069daae254fc487eee;games/snake.html=0df0872c916664c5cc452eb5e70153d6b25fda9efb02d0e44ea50023e36123fd;games/typing.html=f89ec2cfbbfcbca6a7e913a1e8b30b5075745d043c620c5e273c85a11d6eab49;games/wiki.txt=a237f5f75227a6d1a5a70e70ca732fa7a032f06a18184207c8b9483aa6406cdf;help.txt=0d06f49cf5d9a36bec127e1e67a42ed96d60bfa23c2776eb15233baac3435173;help/ar.txt=4914623d662f0b222cb781d653289df6a57392716aa7e0f3e5a180c81df80d66;help/bn.txt=a7cd0067a3652c6a5327880550e3e3c3545c41c1ee939b948d292137e6a4cdb6;help/de.txt=a32c62ee9133c377f13dae70e3eae4a8dce03071c05db834494d67a4132bc0a3;help/es.txt=77cdb74690f8ba05723a83001d5628a635bc1ce4771e67aabd0662b134a59e16;help/fil.txt=1cfd0c226cb0dc31a8cb284ede440148879533cf1766897dd3b5fbfbfb411185;help/fr.txt=fcca0c1e9e51c3e14c1aefbf73d6404378c743c403466d06a49572a8926057e9;help/hi.txt=d91a3b3d409c5ff567393fa882e3bc9e7da6b74712f3a807deda55f76a365d1b;help/id.txt=4fdc0b2f0760369abe3118872acfbafe0487122db3854a013aef2496e788e67a;help/it.txt=49a20f2139ad74a8546ced32151efdd4be1288b0b80942e742f67df0c6b20d29;help/ja.txt=b6a36ae1d3acb9b7eee608d2319167272f961867cba51bf58e8bbe18d796d68e;help/ko.txt=c4a8e6be7b747bb49c7ac4bc23f816bc776198b6eeef70af4c3fe794ee639f71;help/nl.txt=30792ec2e67a5545ab22c06c2bd602d8eefcdbac956c9baabc5fd32ded258374;help/pl.txt=06023f5466c93b841ab156fe4785cb3f20ff343b118bf63e9e0becfede232618;help/pt.txt=fc9c2c07380ac0b2ea1989653fd6bde06c02497f376399fb37fa255af61ff595;help/ru.txt=889ac1260ca4168396efc2a8b195a468fbe033ed94edfbe89789cf66d428fa18;help/sv.txt=241071f376140f19cbcfba0343214d747fb4bab085503a7bc3b0a00dc5155e0a;help/th.txt=574bb8a137d4ce5b2c3bb76f8b4dd7b7cb4fa47f8d1abad35510a8f6c504693c;help/tr.txt=e6f42478904e93321a9c6bdda0cddfac2f83e8bba91556db77a9622ab2df6100;help/uk.txt=575b67faecabc31568a1bec9bacd791c9de226629bd3ca8e1289b3e2cfcca63e;help/vi.txt=c4e07bcff348ad94db67e7d1d4e40b22488f28aa3040c2928eac7da95da90bac;help/zh-hans.txt=3832be4515798185f48c4be76724de6518a4bcdf5d14ed18d46911b4b38d7050;help/zh-hant.txt=3feb901a0fe9eb9088b453c5eda0dacc623a6c053ccbaea62ebe7203b6aa4bc5;languages.txt=e7a6d0a8e6477ca3ec0fac8bbee7715340b1b7c213b4b1fcb1b44156d97eca6b;pages/guess.js=8d451ce04fc6aa5cca8352702d3337e01bc17d8cf28def5f3dbbff2013e82bf9;pages/her.html=aba71a922bf8fdda8a648f13561a9eac22f583b8c2c6c0d75e8ca76bc0aa990b;pages/home.css=c86f0bd138d3f9e7317872eb44522f35c7bc51b76bd796e4c254c5e1305da645;pages/pages.css=f30510042634eb27310b1baa40575f0dff6696d24acb24795fabf4c84436681e;pages/race-clock.js=f440b43e32b7c760aefcf8a065f3c59c44da5688d19970e10dfc3b297c04c23d;pages/room.txt=7af0e00c323673cb7d708350af38a68da401e1d9e5af4a9d64d3fab469e970e8;pages/welcome.html=a2b6d38e3343c420c6ff17ed6d1ec00eadf505d7bcbc7cfc3fba6a58d0416a99;settings.css=b1b05b20bc210385de5306bc2b7ff99f441b41fb328d0cd0d498be10b4c94cf8;whats-new.txt=79ad202d2f8d9467e77ff8005116d6fe588372fe5e315bae4a115f7e21085ba8";
 
 	// A Browser addons file, only if it's one of ours and matches its fingerprint; throws otherwise.
 	internal static string Pinned(WebClient web, string file)
@@ -10465,6 +10465,8 @@ public class CapriInternalBrowser : ICapriMod
 			for (int i = 0; i < stats.GetLength(0); i++) state.Append(stats[i, 0]).Append(':').Append(Stat(stats[i, 1])).Append(',');
 			state.Append("watch:").Append(Stat("watchall") / 60).Append(",save:").Append(Quote(Kept("her-save"))).Append(",face:").Append(Quote(HerFace())).Append(",gifts:[");
 			foreach (string[] g in Gifts()) state.Append('[').Append(Quote(g[0])).Append(',').Append(Quote(g[1])).Append("],");
+			state.Append("],pics:[");
+			for (int i = 0; i < 4; i++) state.Append(Quote(HerPic(i))).Append(',');
 			return html.Append(Colored(page, mod.look.Colors).Replace("%OWN%", Own).Replace("%STATE%", state.Append("]}").ToString())).Append("</body></html>").ToString();
 		}
 
@@ -10513,6 +10515,14 @@ public class CapriInternalBrowser : ICapriMod
 					return "{n:" + n + ",w:" + w + ",h:" + high + ",fps:" + ((double)fps * n / all).ToString("0.##", CultureInfo.InvariantCulture) + ",u:'data:image/png;base64," + Convert.ToBase64String(png.ToArray()) + "'}";
 				}
 			}
+		}
+
+		// The pictures they hung in her frames: a small JPEG each, kept beside the mod. Nothing else is ever read or written here.
+		static readonly Regex HerJpeg = new Regex(@"^data:image/jpeg;base64,[A-Za-z0-9+/]{100,40000}={0,2}$");
+		static string HerPicFile(int n) { return Host == null || string.IsNullOrEmpty(Host.Folder) ? null : Path.Combine(Host.Folder, "her-pic" + n + ".txt"); }
+		static string HerPic(int n)
+		{
+			try { string file = HerPicFile(n), got = file != null && File.Exists(file) ? File.ReadAllText(file) : ""; return HerJpeg.IsMatch(got) ? got : ""; } catch { return ""; }
 		}
 
 		internal void HerSays(string line)
@@ -10598,7 +10608,7 @@ public class CapriInternalBrowser : ICapriMod
 		// Her page's own buttons.
 		void HerLink(Tab t, string url)
 		{
-			Match m = Regex.Match(url, @"[?&](s|go|del|reset|in|room)=([^&]*)");
+			Match m = Regex.Match(url, @"[?&](s|go|del|reset|in|room|pic)=([^&]*)");
 			if (!m.Success) return;
 			string what = m.Groups[1].Value, value = Uri.UnescapeDataString(m.Groups[2].Value);
 			Uri to;
@@ -10606,6 +10616,12 @@ public class CapriInternalBrowser : ICapriMod
 			if (what == "s") { if (value.Length <= 4000 && value.Begins("{")) Keep("her-save", value); Keep("her-drop", ""); return; }
 			if (what == "in") { herIn = value == "1"; return; }
 			if (what == "room") { SendRoom(t); return; }
+			if (what == "pic")
+			{
+				string file = value.Length > 1 && value[0] >= '0' && value[0] <= '3' && value[1] == '.' ? HerPicFile(value[0] - '0') : null;
+				try { if (file != null && value.Length == 2) File.Delete(file); else if (file != null && HerJpeg.IsMatch(value.Substring(2))) File.WriteAllText(file, value.Substring(2)); } catch { }
+				return;
+			}
 			if (what == "go") { if (Uri.TryCreate(value, UriKind.Absolute, out to) && to.Scheme == "https") OpenTab(null, value, true); return; }
 			if (what == "reset") Keep("her-save", "");
 			List<string[]> all = Gifts();
