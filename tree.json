@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "commit": "cee349d12195fcc39722cdd01e322997322a1125",
+  "commit": "45c6f4d9a711e101ded26148f546d80f5948f12b",
   "tree": [
     {"path": "mods/MK001-dice-roller/MK001-dice-roller.capri-code", "type": "blob", "sha": "d2fc7cd88cfa7b85789e78741371f7191735bc9f", "size": 249409},
     {"path": "mods/MK001-dice-roller/README.md", "type": "blob", "sha": "aefd508a141369224a2388269f57346f63222ca9", "size": 1996},
@@ -255,7 +255,7 @@
     {"path": "mods/outfit-schedule/outfit-schedule.capri-code", "type": "blob", "sha": "de7b860da4c840449ff43e57f78e2ca2f80033d8", "size": 32495},
     {"path": "mods/outfit-schedule/preview.png", "type": "blob", "sha": "dc8655ef9a4441a4637bf8581606a3f019106bde", "size": 71538},
     {"path": "mods/paint-job/README.md", "type": "blob", "sha": "5298bc6747f547ac2a63f5ff7abbecb9151483a9", "size": 1229},
-    {"path": "mods/paint-job/paint-job.capri-code", "type": "blob", "sha": "243683190133854bb5f445b10713cdff9327269e", "size": 21123},
+    {"path": "mods/paint-job/paint-job.capri-code", "type": "blob", "sha": "112cf4a51f88ed773675951a1da1caa782f28744", "size": 21045},
     {"path": "mods/paint-job/preview.png", "type": "blob", "sha": "182e920609b8e064e20d13eb984ae28783e9e5b3", "size": 1278318},
     {"path": "mods/paste-pictures/README.md", "type": "blob", "sha": "8d5d6a91bb7a22481819541528131ff02c9164b9", "size": 913},
     {"path": "mods/paste-pictures/paste-pictures.capri-code", "type": "blob", "sha": "df5b02be2896762148a6822f89c34067cdfb7cff", "size": 19799},
