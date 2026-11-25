@@ -9569,7 +9569,7 @@ public class CapriInternalBrowser : ICapriMod
 					got["commands"] = get("data/commands.txt");
 					got["css-home"] = get("pages/home.css");
 					got["css-pages"] = get("pages/pages.css");
-					got["page-her"] = get("pages/her.html");
+					KeepHerPage(get("pages/her.html"));
 					got["lang"] = get("languages.txt");
 					foreach (string p in AddonHashes.Split(';'))
 					{
@@ -9595,7 +9595,6 @@ public class CapriInternalBrowser : ICapriMod
 						if (p.Key == "lang") { UseLanguages(p.Value); Host.Store.Set("langpack", p.Value); } else Keep(p.Key, p.Value);
 						if (p.Key == "adblock") Keep("adblock-pin", AddonsCommit);
 						if (p.Key == "lists") Keep("look-pin", AddonsCommit);
-						if (p.Key == "page-her") Keep("her-pin", AddonsCommit);
 					}
 					if (kept == 0) { dlNote = "Couldn't reach Browser addons right now. The browser still works, try again later."; if (!silent) mod.Tell("Couldn't reach Browser addons right now. Try again later."); }
 					else
@@ -10515,18 +10514,31 @@ public class CapriInternalBrowser : ICapriMod
 			ShowReader(tab);
 		}
 
+		static string HerFile(string name) { return Host == null || string.IsNullOrEmpty(Host.Folder) ? null : Path.Combine(Host.Folder, name); }
+		bool KeepHerPage(string got)
+		{
+			string file = HerFile("her-page.html");
+			if (got == null || file == null) return false;
+			try { File.WriteAllText(file, got); } catch { return false; }
+			// Where it was kept before.
+			Post(delegate { if (Kept("page-her").Length > 0) Keep("page-her", ""); });
+			return true;
+		}
+
 		bool herAsked;
 		string HerPage()
 		{
-			string page = Kept("page-her");
-			if ((page.Length < 100 || Kept("her-pin") != AddonsCommit) && !herAsked)
+			string page = "";
+			try { string file = HerFile("her-page.html"); if (file != null && File.Exists(file)) page = File.ReadAllText(file); } catch { }
+			if (!Matches("pages/her.html", page)) page = "";
+			if (page.Length == 0 && !herAsked)
 			{
 				herAsked = true;
 				Behind(delegate
 				{
 					string got = null;
 					try { using (WebClient web = new WebClient()) { web.Encoding = Encoding.UTF8; got = Pinned(web, "pages/her.html"); } } catch { }
-					Post(delegate { herAsked = got == null && page.Length >= 100; if (got == null) return; Keep("page-her", got); Keep("her-pin", AddonsCommit); foreach (Tab t in tabs) if (t.Special == "her") ShowReader(t); });
+					Post(delegate { herAsked = false; if (KeepHerPage(got)) foreach (Tab t in tabs) if (t.Special == "her") ShowReader(t); });
 				});
 			}
 			StringBuilder html = Start(mod.look, "");
@@ -10549,7 +10561,7 @@ public class CapriInternalBrowser : ICapriMod
 		{
 			Behind(delegate
 			{
-				string file = Host == null || string.IsNullOrEmpty(Host.Folder) ? null : Path.Combine(Host.Folder, "her-room.txt"), got = null;
+				string file = HerFile("her-room.txt"), got = null;
 				try { if (file != null && File.Exists(file)) got = File.ReadAllText(file); } catch { }
 				if (!Matches("pages/room.txt", got))
 				{
@@ -10593,10 +10605,9 @@ public class CapriInternalBrowser : ICapriMod
 
 		// The pictures they hung in her frames: a small JPEG each, kept beside the mod. Nothing else is ever read or written here.
 		static readonly Regex HerJpeg = new Regex(@"^data:image/jpeg;base64,[A-Za-z0-9+/]{100,40000}={0,2}$");
-		static string HerPicFile(int n) { return Host == null || string.IsNullOrEmpty(Host.Folder) ? null : Path.Combine(Host.Folder, "her-pic" + n + ".txt"); }
 		static string HerPic(int n)
 		{
-			try { string file = HerPicFile(n), got = file != null && File.Exists(file) ? File.ReadAllText(file) : ""; return HerJpeg.IsMatch(got) ? got : ""; } catch { return ""; }
+			try { string file = HerFile("her-pic" + n + ".txt"), got = file != null && File.Exists(file) ? File.ReadAllText(file) : ""; return HerJpeg.IsMatch(got) ? got : ""; } catch { return ""; }
 		}
 
 		// The room's screens, every second or so while it's in front. Song and Discord pictures stay in memory.
@@ -10724,7 +10735,7 @@ public class CapriInternalBrowser : ICapriMod
 			if (what == "media") { Behind(delegate { MediaPress(value); }); return; }
 			if (what == "pic")
 			{
-				string file = value.Length > 1 && value[0] >= '0' && value[0] <= '3' && value[1] == '.' ? HerPicFile(value[0] - '0') : null;
+				string file = value.Length > 1 && value[0] >= '0' && value[0] <= '3' && value[1] == '.' ? HerFile("her-pic" + value[0] + ".txt") : null;
 				try { if (file != null && value.Length == 2) File.Delete(file); else if (file != null && HerJpeg.IsMatch(value.Substring(2))) File.WriteAllText(file, value.Substring(2)); } catch { }
 				return;
 			}
