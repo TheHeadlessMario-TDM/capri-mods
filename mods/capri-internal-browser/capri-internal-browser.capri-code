@@ -5254,7 +5254,7 @@ public class CapriInternalBrowser : ICapriMod
       int i, laps = 1;
       for (i = from; i < steps.Length && !stopped && !Halted; i++)
       {
-        string step = Regex.Replace(steps[i].Trim(), @"^(?:then|and|and\s+then|next|after\s+that)[,\s]+", "", Plain).Trim().TrimEnd('.');
+        string step = Regex.Replace(steps[i].Trim(), @"^(?:then|and|and\s+then|next(?!\s+(?:video|one|song|episode|page)s?\b)|after\s+that)[,\s]+", "", Plain).Trim().TrimEnd('.');
         string next = i + 1 < steps.Length ? steps[i + 1].Trim() : "";
         // "repeat 20 times": all the steps before it again, 100 times at most (once in a test). Esc stops it.
         Match again = Regex.Match(step, @"^(?:repeat|loop|do)(?:\s+(?:it|that|this|everything|all\s+(?:of\s+)?(?:it|that)|the\s+steps|the\s+job))?(?:\s+again)?\s+(\d{1,3})\s*(?:x|times?)$", Plain);
@@ -5399,6 +5399,7 @@ public class CapriInternalBrowser : ICapriMod
       jobSite = pick;
       return BrowserTool("open " + pick);
     }
+    if (s == "next" || s == "next video" || s == "next one" || s == "next song") return BrowserTool("next");
     if (Straight(step)) return null;
     // Anything else that starts with one of her browser words: play, pause, click, scroll, search, open, next...
     Match verb = Regex.Match(s, @"^(play(?!\s+(?:me|something|some)\b)|pause|mute|unmute|click|press|scroll|search|open|go\s+to|go|find(?!\s+me\b)|next|loop|captions|subtitles|louder|quieter|pop\s*out|zoom|translate|back|forward|reload|autoscroll)\b\s*(.*)$");
@@ -5616,7 +5617,7 @@ public class CapriInternalBrowser : ICapriMod
   static string Tidy(string step)
   {
     string s = (step ?? "").Trim().TrimEnd('.', '!', '?').Trim();
-    s = Regex.Replace(s, @"^(?:(?:can|could|would|will)\s+you\s+|please\s+|pls\s+|i\s+(?:want|need|would\s+like)\s+you\s+to\s+|i'?d\s+like\s+you\s+to\s+|go\s+ahead\s+and\s+|(?:and\s+)?then\s+|and\s+|next,?\s+|after\s+that,?\s+|now\s+|also\s+|first,?\s+|finally,?\s+|lastly,?\s+|capri,?\s+)+", "", Plain);
+    s = Regex.Replace(s, @"^(?:(?:can|could|would|will)\s+you\s+|please\s+|pls\s+|i\s+(?:want|need|would\s+like)\s+you\s+to\s+|i'?d\s+like\s+you\s+to\s+|go\s+ahead\s+and\s+|(?:and\s+)?then\s+|and\s+|next(?!\s+(?:video|one|song|episode|page)s?\b),?\s+|after\s+that,?\s+|now\s+|also\s+|first,?\s+|finally,?\s+|lastly,?\s+|capri,?\s+)+", "", Plain);
     s = Regex.Replace(s, @"(?:,?\s+(?:please|pls|plz|for\s+me|thanks|thank\s+you))+$", "", Plain);
     for (int i = 0; i < SameStep.GetLength(0); i++) s = Regex.Replace(s, SameStep[i, 0], SameStep[i, 1], Plain);
     s = Regex.Replace(s, @"\s+", " ").Trim();
