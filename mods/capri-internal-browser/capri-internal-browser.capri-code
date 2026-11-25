@@ -3893,6 +3893,11 @@ public class CapriInternalBrowser : ICapriMod
 			history.Insert(0, url + "\t" + Regex.Replace(title ?? "", @"[\t\r\n]+", " ").Trim() + "\t" + DateTime.Now.Ticks);
 			if (history.Count > 400) history.RemoveRange(400, history.Count - 400);
 			joined = string.Join("\n", history.ToArray());
+			while (Encoding.UTF8.GetByteCount(joined) > 60000 && history.Count > 10)
+			{
+				history.RemoveRange(history.Count - 10, 10);
+				joined = string.Join("\n", history.ToArray());
+			}
 		}
 		if (capri != null) capri.Store.Set("history", joined);
 		Watched(url, title);
