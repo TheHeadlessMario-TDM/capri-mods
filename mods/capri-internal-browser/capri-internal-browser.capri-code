@@ -5956,7 +5956,13 @@ public class CapriInternalBrowser : ICapriMod
   {
     public Viewer Viewer;
     public Page Page;               // her results, when it's showing them
-    public bool Private;            // nothing kept: no history, not reopened, its own cookies
+    private bool alone;
+    private string at, name = T(0);
+    // Secret: Guess the Site is hiding it, so it's private and says nothing about itself.
+    public bool Secret;
+    public bool Private { get { return alone || Secret; } set { alone = value; } }  // nothing kept: no history, not reopened, its own cookies
+    public string Address { get { return Secret ? null : at; } set { at = value; } }
+    public string Title { get { return Secret ? "Guess the Site" : name; } set { name = value; } }
     public bool Hidden;             // Capri's own Discord, out of sight: no tab in the strip, not in history or counters
     public string Html;
     public string Special;          // one of her own pages that isn't the Speed Dial, like "history"
@@ -5969,7 +5975,6 @@ public class CapriInternalBrowser : ICapriMod
     public DateTime LeftAt;
     public int Tracked;             // trackers stopped on the page it's showing
     public int Blocked;             // ads blocked on the page it's showing     // OnReader: one of her own pages (results or the new tab page), not a website
-    public string Title = T(0), Address;
     public Panel Chip;
     public Label Name;
     public Button Close;
@@ -6143,7 +6148,7 @@ public class CapriInternalBrowser : ICapriMod
       chatting.Start();
       later.Tick += delegate { later.Dispose(); Wrap(false); };
       later.Start();
-      address.TextChanged += delegate { if (Masked(tab) && !address.Focused && address.Text != Mask) address.Text = Mask; };
+      address.TextChanged += delegate { if (Masked(tab) && address.Text != Mask) address.Text = Mask; };
       if (Flag("boot", true)) { BootScreen boot = new BootScreen(); Controls.Add(boot); boot.BringToFront(); }
       Disposed += delegate { watching.Dispose(); dozing.Dispose(); later.Dispose(); };
       Controls.Add(loading);
@@ -6352,6 +6357,7 @@ public class CapriInternalBrowser : ICapriMod
       bool sideBySide = Split && (t == splitA || t == splitB) && (was == splitA || was == splitB);
       ShowPages(t);
       if (was != null && was != t && !sideBySide) t.Viewer.Script(SwitchFade);
+      address.ReadOnly = Masked(t);
       address.Text = t.OnReader ? (t.Page == null ? (t.Address ?? "") : t.Page.Query) : (t.Address ?? "");
       loading.Visible = t.Busy && !full;
       if (TitleChanged != null) TitleChanged(t.Title);
@@ -9137,6 +9143,14 @@ public class CapriInternalBrowser : ICapriMod
 
     private bool Masked(Tab t) { return t != null && t == guessTab && guessing != null; }
     private const string Mask = "? ? ?   Which site is this?";
+    private void GuessOver()
+    {
+      guessing = null;
+      guessTab.Secret = false;
+      guessTab.Viewer.Blurred(false);
+      if (guessTab == tab) address.ReadOnly = false;
+      Retitle(guessTab, guessTab.Title);
+    }
 
     private void Guess(Tab t)
     {
@@ -9558,7 +9572,9 @@ public class CapriInternalBrowser : ICapriMod
         for (int i = 0; i < 4; i++) guessing[i] = sites[pick[i]][0];
         guessAnswer = pick.IndexOf(answer);
         if (guessTab == null || !tabs.Contains(guessTab)) { OpenTab(null, null, true); guessTab = tab; }
+        guessTab.Secret = true;
         Select(guessTab);
+        address.ReadOnly = true;
         guessTab.Viewer.Blurred(true);
         guessTab.Viewer.Go(sites[answer][1]);
         address.Text = Mask;
@@ -9569,9 +9585,7 @@ public class CapriInternalBrowser : ICapriMod
       {
         if (guessing == null) return;
         bool right = all.Contains("r=1");
-        guessing = null;
-        guessTab.Viewer.Blurred(false);
-        Retitle(guessTab, guessTab.Title);
+        GuessOver();
         if (guessTab == tab) address.Text = guessTab.Address ?? "";
         if (right) { guessStreak++; guessScore++; Bump("guess", 1); Bump("guessbest", guessScore, true); } else { guessStreak = 0; guessLives--; }
         if (guessLives < 1) AutoSend(false);
@@ -10702,7 +10716,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     {
       if (summary == null || summary.Working) return;
       Tab t = tab;
-      if (t.Private) { mod.Tell("That's a private tab, so I won't send it anywhere, choom."); return; }
+      if (t.Private) { mod.Tell(Masked(t) ? "No cheating, choom. Guess it first." : "That's a private tab, so I won't send it anywhere, choom."); return; }
       if (t.OnReader && t.Page == null) { mod.Tell(question == null ? "Open a page first and I'll sum it up for you, choom." : "Open a page first, then ask me about it, choom."); return; }
       summary.Working = true;
       giveUp.Stop();
@@ -10719,7 +10733,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     {
       Tab t = tab;
       if (t == null) return;
-      if (t.Private) { mod.Tell("That's a private tab, so I won't send it anywhere, choom."); return; }
+      if (t.Private) { mod.Tell(Masked(t) ? "No cheating, choom. Guess it first." : "That's a private tab, so I won't send it anywhere, choom."); return; }
       if (t.OnReader && t.Page == null) { mod.Tell("Open a page first, then ask me about it, choom."); return; }
       adding = false;
       asking = true;
@@ -10736,7 +10750,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     {
       Tab t = Work;
       if (t == null) return "no tab";
-      if (t.Private) return "nothing you can see";
+      if (t.Private) return Masked(t) ? "a hidden Guess the Site page (no hints)" : "nothing you can see";
       return "tab " + (tabs.IndexOf(t) + 1) + " of " + tabs.Count + ", \"" + Clip(t.Title ?? "", 90) + "\""
         + (t.OnReader || t.Address == null ? " (Capri Browser's own page)" : " at " + Clip(t.Address, 150)) + (t.Busy ? ", still loading" : "") + (t.Playing ? ", playing sound" : "");
     }
@@ -10784,7 +10798,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       why = null;
       Tab t = Work;
       if (t == null) why = "There's no tab open.";
-      else if (t.Private) why = "That's a private tab, so that one's theirs alone.";
+      else if (t.Private) why = Masked(t) ? "They're playing Guess the Site, so the page is hidden till they guess. No hints: tell them no cheating." : "That's a private tab, so that one's theirs alone.";
       else if (t.OnReader || t.Address == null) why = "The tab in front is Capri Browser's own page, not a website. Use go <site> first.";
       if (why != null) return null;
       Task<string> run = t.Viewer.Script(script);
@@ -14425,6 +14439,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     // Capri Browser's own keys. Edge's own (Ctrl+F, Ctrl+P, zoom) are left to the page.
     internal bool Shortcut(Keys keyData)
     {
+      if (Masked(tab) && (keyData == Keys.F12 || ((keyData & Keys.Control) != 0 && "UIJCFPASG".IndexOf((char)(keyData & Keys.KeyCode)) >= 0))) return true;
       if (keyData == (Keys.Control | Keys.T)) { NewTab(); return true; }
       if (keyData == (Keys.Control | Keys.W) || keyData == (Keys.Control | Keys.F4)) { Tab closing = tab; Later(delegate { Close(closing); }); return true; }
       if (keyData == (Keys.Control | Keys.Shift | Keys.PageDown) && tab != null) { MoveTab(tab, tabs.IndexOf(tab) + 1); Remember(); return true; }
@@ -14717,7 +14732,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       v.Busy = delegate(bool busy) { t.Busy = busy; if (t == tab) loading.Visible = busy && !full; };
       v.Blocks = delegate(int count) { if (count > t.Blocked) adsNew += count - t.Blocked; t.Blocked = count; if (t == tab) ShowShield(); };
       v.Downloading = delegate(object operation, string file, string from) { Downloading(operation, file, from); };
-      v.PageMenu = delegate { if (!(t == tab && t.OnReader && t.Special == null && t.Address == null && (t.Page == null || t.Page.Results.Count == 0))) return false; Later(DialMenu); return true; };
+      v.PageMenu = delegate { if (Masked(t)) return true; if (!(t == tab && t.OnReader && t.Special == null && t.Address == null && (t.Page == null || t.Page.Results.Count == 0))) return false; Later(DialMenu); return true; };
       v.Typed = delegate { if (t == tab) Blip("key"); };
       v.Escaped = delegate { if (mod.Driving) mod.Halt(); };
       v.Tracks = delegate(int count) { if (count > t.Tracked) tracksNew += count - t.Tracked; t.Tracked = count; if (t == tab) ShowShield(); };
@@ -14819,6 +14834,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     // Her own page in a tab: her results when it has some, otherwise the new tab page.
     private void ShowReader(Tab t)
     {
+      if (Masked(t)) GuessOver();
       t.OnReader = true;
       t.Address = null;
       if (t.Special == "settings")
@@ -15107,6 +15123,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
 
     private void Visit()
     {
+      if (Masked(tab)) { mod.Tell("No peeking, choom. Guess it first."); return; }
       string typed = address.Text.Trim();
       if (race != null && race.Tab == tab && !asking && !typed.Begins("?"))
       {
