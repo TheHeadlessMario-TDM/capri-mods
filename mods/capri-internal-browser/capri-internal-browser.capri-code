@@ -4050,16 +4050,38 @@ public class CapriInternalBrowser : ICapriMod
 
 	[DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int how);
 	// Her picture on the desktop, hidden and brought back without taking focus. Only ever brought back if this hid it.
-	bool herHidden;
-	internal void HideHer(bool hide)
+	internal bool HerHidden;
+	HerTab herTab;
+	bool raised;
+	internal void HideHer(bool hide, Form over)
 	{
-		if (hide == herHidden) return;
+		if (!hide && herTab != null) { HerTab gone = herTab; herTab = null; gone.Close(); }
+		ShowHer(!hide);
+		if (!hide && raised) { raised = false; Settled(); }
+		if (!hide || !HerHidden || over == null) return;
+		herTab = new HerTab(this);
+		herTab.Put(over);
+		// Closed with the browser, or any other way: she's back.
+		herTab.FormClosed += delegate { herTab = null; ShowHer(true); if (raised) { raised = false; Settled(); } };
+		herTab.Show(over);
+	}
+	// Full screen's over: in front of everything only if she was before.
+	void Settled()
+	{
+		Form her = capri.Ui.Window;
+		if (her != null && !her.IsDisposed && her.IsHandleCreated && !her.TopMost) Browser.ToTop(her.Handle, false);
+	}
+	internal void ShowHer(bool show)
+	{
+		if (show != HerHidden) return;
 		try
 		{
 			Form her = capri.Ui.Window;
-			if (her == null || her.IsDisposed || !her.IsHandleCreated || (hide && !her.Visible)) return;
-			ShowWindow(her.Handle, hide ? 0 : 4);
-			herHidden = hide;
+			if (her == null || her.IsDisposed || !her.IsHandleCreated || (!show && !her.Visible)) return;
+			ShowWindow(her.Handle, show ? 4 : 0);
+			HerHidden = !show;
+			// Over the video, not behind it.
+			if (show && herTab != null) { raised = true; Browser.ToTop(her.Handle); }
 		}
 		catch (Exception error) { capri.Log("hiding her: " + error.Message); }
 	}
@@ -4241,9 +4263,9 @@ public class CapriInternalBrowser : ICapriMod
 	};
 
 	// Browser addons, pinned to one commit. Every file must match its SHA-256 here, or it isn't used.
-	const string AddonsCommit = "56612f9c6ba77b65425f4f4f9acd63def9eec29d";
+	const string AddonsCommit = "5caee85ab76d9b8abb64b2f984a2278fb50d1b39";
 	const string Addons = "https://raw.githubusercontent.com/tob7as/Browser-addons/" + AddonsCommit + "/";
-	const string AddonHashes = "data/adblock.txt=f38d348c8396b5680bf97d38678abd9e2d200a8438deb5edf3c7e2c86fc96346;data/commands.txt=e1d3e5bcbed9ef9ca4bef7f0fff6b63f4399f3eeb0e91692a19f240f79c8db4b;data/lists.txt=26ab644da1b31badca1bb502de1ae8d091f93287339f1f6cc67dcce7a53bb12e;games.txt=72379fea00637a9efe61cb52b285a136368b7f2556da57fe7e086734450ae891;games/anime.html=454cdb79b13b338449f0a9bc21bb630d2757273565721798ecfd2422828d31ce;games/celebs.html=ea4604ec23d2970969637b0e0bcc583c365329418149f980b7be74f3c5e8b2bf;games/daily.html=8fe939bee76b10c73f6f1ee687302bf69332aa2043e4c1a8f98aab304c3d1ec2;games/freegames.html=dd34dc788b27df8e0b68d42573e12d8a623b20d53f648be28b1a9a15bb33641d;games/guess.txt=1bca3689c63ed41b0dca427081b6358889cd576e7174240e9da781ba681054a0;games/memory.html=45d48eb7f452a205f86c1d32458036cd7995e931cf62d9b8163ee7750f5436bb;games/reaction.html=4194adf2ee79863a8c2f59aac8db72ee97689c037146c9dd8fdf8bcf077dff2f;games/roulette.txt=8fe6d057f1fc387ae0e6992f33b9766baaa903fb5cb278069daae254fc487eee;games/snake.html=0df0872c916664c5cc452eb5e70153d6b25fda9efb02d0e44ea50023e36123fd;games/typing.html=f89ec2cfbbfcbca6a7e913a1e8b30b5075745d043c620c5e273c85a11d6eab49;games/wiki.txt=a237f5f75227a6d1a5a70e70ca732fa7a032f06a18184207c8b9483aa6406cdf;help.txt=bfec9a54dd949dda1ec10ca05c16bc56cce49081136eae8bab98c1eb71c526cc;help/ar.txt=4914623d662f0b222cb781d653289df6a57392716aa7e0f3e5a180c81df80d66;help/bn.txt=a7cd0067a3652c6a5327880550e3e3c3545c41c1ee939b948d292137e6a4cdb6;help/de.txt=a32c62ee9133c377f13dae70e3eae4a8dce03071c05db834494d67a4132bc0a3;help/es.txt=77cdb74690f8ba05723a83001d5628a635bc1ce4771e67aabd0662b134a59e16;help/fil.txt=1cfd0c226cb0dc31a8cb284ede440148879533cf1766897dd3b5fbfbfb411185;help/fr.txt=fcca0c1e9e51c3e14c1aefbf73d6404378c743c403466d06a49572a8926057e9;help/hi.txt=d91a3b3d409c5ff567393fa882e3bc9e7da6b74712f3a807deda55f76a365d1b;help/id.txt=4fdc0b2f0760369abe3118872acfbafe0487122db3854a013aef2496e788e67a;help/it.txt=49a20f2139ad74a8546ced32151efdd4be1288b0b80942e742f67df0c6b20d29;help/ja.txt=b6a36ae1d3acb9b7eee608d2319167272f961867cba51bf58e8bbe18d796d68e;help/ko.txt=c4a8e6be7b747bb49c7ac4bc23f816bc776198b6eeef70af4c3fe794ee639f71;help/nl.txt=30792ec2e67a5545ab22c06c2bd602d8eefcdbac956c9baabc5fd32ded258374;help/pl.txt=06023f5466c93b841ab156fe4785cb3f20ff343b118bf63e9e0becfede232618;help/pt.txt=fc9c2c07380ac0b2ea1989653fd6bde06c02497f376399fb37fa255af61ff595;help/ru.txt=889ac1260ca4168396efc2a8b195a468fbe033ed94edfbe89789cf66d428fa18;help/sv.txt=241071f376140f19cbcfba0343214d747fb4bab085503a7bc3b0a00dc5155e0a;help/th.txt=574bb8a137d4ce5b2c3bb76f8b4dd7b7cb4fa47f8d1abad35510a8f6c504693c;help/tr.txt=e6f42478904e93321a9c6bdda0cddfac2f83e8bba91556db77a9622ab2df6100;help/uk.txt=575b67faecabc31568a1bec9bacd791c9de226629bd3ca8e1289b3e2cfcca63e;help/vi.txt=c4e07bcff348ad94db67e7d1d4e40b22488f28aa3040c2928eac7da95da90bac;help/zh-hans.txt=3832be4515798185f48c4be76724de6518a4bcdf5d14ed18d46911b4b38d7050;help/zh-hant.txt=3feb901a0fe9eb9088b453c5eda0dacc623a6c053ccbaea62ebe7203b6aa4bc5;languages.txt=e7a6d0a8e6477ca3ec0fac8bbee7715340b1b7c213b4b1fcb1b44156d97eca6b;pages/guess.js=8d451ce04fc6aa5cca8352702d3337e01bc17d8cf28def5f3dbbff2013e82bf9;pages/home.css=c86f0bd138d3f9e7317872eb44522f35c7bc51b76bd796e4c254c5e1305da645;pages/pages.css=f30510042634eb27310b1baa40575f0dff6696d24acb24795fabf4c84436681e;pages/race-clock.js=f440b43e32b7c760aefcf8a065f3c59c44da5688d19970e10dfc3b297c04c23d;pages/welcome.html=a2b6d38e3343c420c6ff17ed6d1ec00eadf505d7bcbc7cfc3fba6a58d0416a99;settings.css=56c265dd539590144cbee7003f2eb0a4b94cf5bc8d128f4a5f5aac3c2a90020b;whats-new.txt=2c1c7c9e21ba421bbd0f177401e6db81f52cce2676aec7d5e52ce2d9f2108eec";
+	const string AddonHashes = "data/adblock.txt=f38d348c8396b5680bf97d38678abd9e2d200a8438deb5edf3c7e2c86fc96346;data/commands.txt=e1d3e5bcbed9ef9ca4bef7f0fff6b63f4399f3eeb0e91692a19f240f79c8db4b;data/lists.txt=ca5e1cf38b5f095d43f23f33d30bd9661cc53e98b2f8c4dca3ba6dcf849cdc37;games.txt=72379fea00637a9efe61cb52b285a136368b7f2556da57fe7e086734450ae891;games/anime.html=454cdb79b13b338449f0a9bc21bb630d2757273565721798ecfd2422828d31ce;games/celebs.html=ea4604ec23d2970969637b0e0bcc583c365329418149f980b7be74f3c5e8b2bf;games/daily.html=8fe939bee76b10c73f6f1ee687302bf69332aa2043e4c1a8f98aab304c3d1ec2;games/freegames.html=dd34dc788b27df8e0b68d42573e12d8a623b20d53f648be28b1a9a15bb33641d;games/guess.txt=1bca3689c63ed41b0dca427081b6358889cd576e7174240e9da781ba681054a0;games/memory.html=45d48eb7f452a205f86c1d32458036cd7995e931cf62d9b8163ee7750f5436bb;games/reaction.html=4194adf2ee79863a8c2f59aac8db72ee97689c037146c9dd8fdf8bcf077dff2f;games/roulette.txt=8fe6d057f1fc387ae0e6992f33b9766baaa903fb5cb278069daae254fc487eee;games/snake.html=0df0872c916664c5cc452eb5e70153d6b25fda9efb02d0e44ea50023e36123fd;games/typing.html=f89ec2cfbbfcbca6a7e913a1e8b30b5075745d043c620c5e273c85a11d6eab49;games/wiki.txt=a237f5f75227a6d1a5a70e70ca732fa7a032f06a18184207c8b9483aa6406cdf;help.txt=bfec9a54dd949dda1ec10ca05c16bc56cce49081136eae8bab98c1eb71c526cc;help/ar.txt=4914623d662f0b222cb781d653289df6a57392716aa7e0f3e5a180c81df80d66;help/bn.txt=a7cd0067a3652c6a5327880550e3e3c3545c41c1ee939b948d292137e6a4cdb6;help/de.txt=a32c62ee9133c377f13dae70e3eae4a8dce03071c05db834494d67a4132bc0a3;help/es.txt=77cdb74690f8ba05723a83001d5628a635bc1ce4771e67aabd0662b134a59e16;help/fil.txt=1cfd0c226cb0dc31a8cb284ede440148879533cf1766897dd3b5fbfbfb411185;help/fr.txt=fcca0c1e9e51c3e14c1aefbf73d6404378c743c403466d06a49572a8926057e9;help/hi.txt=d91a3b3d409c5ff567393fa882e3bc9e7da6b74712f3a807deda55f76a365d1b;help/id.txt=4fdc0b2f0760369abe3118872acfbafe0487122db3854a013aef2496e788e67a;help/it.txt=49a20f2139ad74a8546ced32151efdd4be1288b0b80942e742f67df0c6b20d29;help/ja.txt=b6a36ae1d3acb9b7eee608d2319167272f961867cba51bf58e8bbe18d796d68e;help/ko.txt=c4a8e6be7b747bb49c7ac4bc23f816bc776198b6eeef70af4c3fe794ee639f71;help/nl.txt=30792ec2e67a5545ab22c06c2bd602d8eefcdbac956c9baabc5fd32ded258374;help/pl.txt=06023f5466c93b841ab156fe4785cb3f20ff343b118bf63e9e0becfede232618;help/pt.txt=fc9c2c07380ac0b2ea1989653fd6bde06c02497f376399fb37fa255af61ff595;help/ru.txt=889ac1260ca4168396efc2a8b195a468fbe033ed94edfbe89789cf66d428fa18;help/sv.txt=241071f376140f19cbcfba0343214d747fb4bab085503a7bc3b0a00dc5155e0a;help/th.txt=574bb8a137d4ce5b2c3bb76f8b4dd7b7cb4fa47f8d1abad35510a8f6c504693c;help/tr.txt=e6f42478904e93321a9c6bdda0cddfac2f83e8bba91556db77a9622ab2df6100;help/uk.txt=575b67faecabc31568a1bec9bacd791c9de226629bd3ca8e1289b3e2cfcca63e;help/vi.txt=c4e07bcff348ad94db67e7d1d4e40b22488f28aa3040c2928eac7da95da90bac;help/zh-hans.txt=3832be4515798185f48c4be76724de6518a4bcdf5d14ed18d46911b4b38d7050;help/zh-hant.txt=3feb901a0fe9eb9088b453c5eda0dacc623a6c053ccbaea62ebe7203b6aa4bc5;languages.txt=e7a6d0a8e6477ca3ec0fac8bbee7715340b1b7c213b4b1fcb1b44156d97eca6b;pages/guess.js=8d451ce04fc6aa5cca8352702d3337e01bc17d8cf28def5f3dbbff2013e82bf9;pages/home.css=c86f0bd138d3f9e7317872eb44522f35c7bc51b76bd796e4c254c5e1305da645;pages/pages.css=f30510042634eb27310b1baa40575f0dff6696d24acb24795fabf4c84436681e;pages/race-clock.js=f440b43e32b7c760aefcf8a065f3c59c44da5688d19970e10dfc3b297c04c23d;pages/welcome.html=a2b6d38e3343c420c6ff17ed6d1ec00eadf505d7bcbc7cfc3fba6a58d0416a99;settings.css=56c265dd539590144cbee7003f2eb0a4b94cf5bc8d128f4a5f5aac3c2a90020b;whats-new.txt=2c1c7c9e21ba421bbd0f177401e6db81f52cce2676aec7d5e52ce2d9f2108eec";
 
 	// A Browser addons file, only if it's one of ours and matches its fingerprint; throws otherwise.
 	internal static string Pinned(WebClient web, string file)
@@ -8949,12 +8971,16 @@ public class CapriInternalBrowser : ICapriMod
 		FormWindowState wasState;
 		Rectangle wasBounds;
 
+		[DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr w, IntPtr after, int x, int y, int wide, int tall, int flags);
+		// To the front without being given the focus.
+		internal static void ToTop(IntPtr w, bool on = true) { SetWindowPos(w, new IntPtr(on ? -1 : -2), 0, 0, 0, 0, 0x13); }
+
 		// Full screen: for a video's own button (or F11) the bars go and her window covers the whole screen.
 		internal void SetFullScreen(bool on)
 		{
 			if (on == full) return;
 			full = on;
-			mod.HideHer(on && !byKey && Flag("hideher", false));
+			mod.HideHer(on && !byKey && Flag("hideher", false), FindForm());
 			Form whole = FindForm();
 			if (whole != null) whole.SuspendLayout();
 			SuspendLayout();
@@ -17163,6 +17189,76 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
 
 // A see-through window that floats over the browser's corner (not over other apps), drawn with per-pixel alpha so her glow shows over the
 // page.
+// The button at the right of the screen while a full screen video hides her: it shows when the mouse moves, like a player's
+// own buttons, and never takes the focus from the video.
+internal sealed class HerTab : Form
+{
+	readonly CapriInternalBrowser mod;
+	readonly Bitmap face;
+	readonly System.Windows.Forms.Timer tick = new System.Windows.Forms.Timer { Interval = 30 };
+	Point seen = Cursor.Position;
+	DateTime moved = DateTime.UtcNow;
+	float grown;
+	bool over;
+
+	public HerTab(CapriInternalBrowser owner)
+	{
+		mod = owner;
+		face = mod.HoloFace();
+		FormBorderStyle = FormBorderStyle.None;
+		ShowInTaskbar = false;
+		StartPosition = FormStartPosition.Manual;
+		Size = new Size(58, 74);
+		Opacity = 0;
+		DoubleBuffered = true;
+		Cursor = Cursors.Hand;
+		new ToolTip().SetToolTip(this, "Bring Capri back, or hide her again");
+		MouseEnter += delegate { over = true; };
+		MouseLeave += delegate { over = false; };
+		MouseClick += delegate { mod.ShowHer(mod.HerHidden); CapriInternalBrowser.Browser.ToTop(Handle); Invalidate(); };
+		tick.Tick += delegate
+		{
+			if (Cursor.Position != seen) { seen = Cursor.Position; moved = DateTime.UtcNow; }
+			double want = over ? 1 : (DateTime.UtcNow - moved).TotalSeconds < 2.5 ? .8 : 0;
+			if (Math.Abs(Opacity - want) > .01) Opacity = Math.Abs(Opacity - want) < .06 ? want : Opacity + (want - Opacity) * .2;
+			float to = over ? 1 : 0;
+			if (Math.Abs(grown - to) > .01f) { grown += (to - grown) * .3f; Invalidate(); }
+		};
+		tick.Start();
+	}
+
+	internal void Put(Form window)
+	{
+		Rectangle screen = Screen.FromControl(window).Bounds;
+		Location = new Point(screen.Right - Width, screen.Top + (screen.Height - Height) / 2);
+		using (var p = new GraphicsPath()) { p.AddPolygon(Edge()); Region = new Region(p); }
+	}
+
+	PointF[] Edge() { return new[] { new PointF(12, 0), new PointF(Width, 0), new PointF(Width, Height), new PointF(12, Height), new PointF(0, Height - 12), new PointF(0, 12) }; }
+
+	protected override bool ShowWithoutActivation { get { return true; } }
+	protected override CreateParams CreateParams { get { CreateParams p = base.CreateParams; p.ExStyle |= 0x08000088; return p; } }
+	protected override void OnFormClosed(FormClosedEventArgs e) { tick.Dispose(); base.OnFormClosed(e); }
+
+	protected override void OnPaint(PaintEventArgs e)
+	{
+		CapriInternalBrowser.Look look = mod.look;
+		Graphics g = e.Graphics;
+		g.SmoothingMode = SmoothingMode.AntiAlias;
+		g.Clear(look.Shade(1));
+		if (face != null)
+		{
+			float tall = 46 + 4 * grown, wide = tall * face.Width / face.Height;
+			g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+			g.DrawImage(face, 34 - wide / 2, (Height - tall) / 2, wide, tall);
+		}
+		using (var line = new Pen(look.Shade(5), 2.5f)) g.DrawPolygon(line, Edge());
+		// Which way she'll go: in, or out.
+		float x = mod.HerHidden ? 10 - 2 * grown : 6 + 2 * grown, d = mod.HerHidden ? -4 : 4, y = Height / 2f;
+		using (var arrow = new Pen(look.Shade(4), 2.5f)) g.DrawLines(arrow, new[] { new PointF(x - d / 2, y - 5), new PointF(x + d / 2, y), new PointF(x - d / 2, y + 5) });
+	}
+}
+
 internal sealed class HoloScreen : Form
 {
 	[StructLayout(LayoutKind.Sequential)] private struct Spot { public int X, Y; }
