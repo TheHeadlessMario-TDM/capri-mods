@@ -119,7 +119,6 @@ public class CapriInternalBrowser : ICapriMod
   // Test hook: what would have gone to her brain, when there's no Capri around.
   internal Action<string> Summarised = null;
 
-  // Brings Capri Browser to the front.
   void ShowBrowser() { InBrowser(b => { b.Do("show", ""); return null; }); }
 
   internal void Tell(string line) { if (capri != null) capri.Say(line); }
@@ -1680,7 +1679,6 @@ public class CapriInternalBrowser : ICapriMod
     return false;
   }
 
-  // The addresses a site's data and permissions live under.
   internal static List<string> SiteOrigins(string host, bool plain)
   {
     var all = new List<string> { "https://" + host };
@@ -2153,7 +2151,6 @@ public class CapriInternalBrowser : ICapriMod
   internal static Dictionary<string, List<string>> Said = new Dictionary<string, List<string>>();
   // Setting tips by key or name, from the "tip" lines.
   internal static Dictionary<string, string> Tips = new Dictionary<string, string>(), Abouts = new Dictionary<string, string>();
-  // The line under a setting saying what it does (from lists.txt), or none.
   internal static string About(string key) { string a; return Abouts.TryGetValue(key, out a) ? a : null; }
 
   // One of her lines for this moment: from data/lists.txt if it has some, else one of the built-in ones.
@@ -2368,7 +2365,6 @@ public class CapriInternalBrowser : ICapriMod
     return "Skipped it, choom.";
   }
 
-
   // ---- Find it cheaper: they point at a product, she looks for it cheaper in a background tab, then asks before bringing it up ----
   static readonly Regex CheaperAsk = new Regex(@"^(?:can\s+you\s+|could\s+you\s+)?(?:find|get|look\s+for|search\s+for|show)\s+(?:me\s+)?(?:this\s+|it\s+|that\s+|a\s+|one\s+)?(?:any(?:thing|where)?\s+)?cheaper(?:\s+(?:one|ones|version|price|deal|option))?(?:\s+(?:for\s+(?:this|it|that)|anywhere|online))?$|^is\s+(?:there|this)\s+(?:a\s+|any\s+)?cheaper(?:\s+(?:one|version|anywhere))?$|^(?:find|compare)\s+(?:the\s+)?(?:best|lowest)\s+price$", Plain);
   bool cheaperBusy;
@@ -2460,7 +2456,6 @@ public class CapriInternalBrowser : ICapriMod
       InBrowser(b => { if (!b.Selected(shop)) b.DropQuiet(shop); return null; });
     });
   }
-
 
   // ---- Tab quiz: she asks one question at a time, takes their answers, and only marks them once all are in ----
   string[] quizAsk, quizRight;
@@ -2943,7 +2938,6 @@ public class CapriInternalBrowser : ICapriMod
     }
     string reply = (answer ?? "").Replace("**", "").Replace("\r", "").Trim();
     if (reply.Length == 0) { capri.Say("My brain ran out of room writing that one up, choom. Try again, or pick a model with more room in Capri Mainframe."); return; }
-    // SAY: ...
     reply = Regex.Replace(reply, @"\s*\b(SAY|TITLE)\s*:\s*", "\n$1: ");
     Match say = Regex.Match(reply, @"^SAY: (.*)$", RegexOptions.Multiline), head = Regex.Match(reply, @"^TITLE: (.*)$", RegexOptions.Multiline);
     string body = Regex.Replace(Regex.Replace(reply, @"^SAY: .*$", "", RegexOptions.Multiline), @"^#+\s*", "", RegexOptions.Multiline).Trim();
@@ -3057,7 +3051,6 @@ public class CapriInternalBrowser : ICapriMod
     return text.ToString().Trim().Length == 0 ? null : text.ToString();
   }
 
-  // The first picture in a note's rich text, saved bigger for reading.
   static string NotePicture(string rtf)
   {
     int at = rtf.IndexOf("\\pict", Exact);
@@ -3861,7 +3854,6 @@ public class CapriInternalBrowser : ICapriMod
     if (capri != null) capri.Store.Set("tabs", sites.ToString());
   }
 
-  // Speed Dial: the sites on the new tab page.
   internal List<string> Dial()
   {
     lock (gate) if (dialNow != null) return new List<string>(dialNow);
@@ -4024,7 +4016,6 @@ public class CapriInternalBrowser : ICapriMod
     }
   }
 
-  // A tile moved to a new address: its name and picture go with it.
   internal void MoveTile(string from, string to)
   {
     string name;
@@ -4804,7 +4795,6 @@ public class CapriInternalBrowser : ICapriMod
       FileNote(book, into => { WithBrowser(b => { b.NoteTo(note, into); return null; }); }, note);
     });
   }
-
 
   // ---- Quick answers: maths, time around the world and unit changes, right away, no tab ----
   // Places for "what time is it in ...", from the "zone" lines in data/lists.txt.
@@ -6089,7 +6079,6 @@ public class CapriInternalBrowser : ICapriMod
       .Append(Css(look, look.Size / 100.0)).Append(extra ?? "").Append(theirs).Append("@keyframes capriIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}body>*{animation:capriIn .32s cubic-bezier(.2,.7,.2,1) both}body>*:nth-child(2){animation-delay:.04s}body>*:nth-child(3){animation-delay:.08s}body>*:nth-child(n+4){animation-delay:.12s}@media (prefers-reduced-motion:reduce){body>*{animation:none}}</style></head><body>");
   }
 
-  // Her results page: what she read, then every result.
   public static string Reader(Page page, Look look, string notice)
   {
     look = look ?? new Look();
@@ -6167,7 +6156,6 @@ public class CapriInternalBrowser : ICapriMod
 
   const string VideoNotice = "<b>Websites need Edge's engine.</b> It's still getting ready, or it couldn't start: press the &#9881; button at the top right to see which. Windows' old Internet Explorer engine isn't safe enough for today's websites, so Capri Browser only uses it for its own pages.";
 
-  // One tab: its own page view, and what it's showing.
   internal sealed class Tab
   {
     public Viewer Viewer;
@@ -6228,7 +6216,6 @@ public class CapriInternalBrowser : ICapriMod
       wallText.Text = message ?? (mod.Wallpaper() == null ? T(17) : T(18));
     }
 
-    // Where the browser saves downloads.
     string DownloadFolder() { return !string.IsNullOrEmpty(mod.look.Downloads) && Directory.Exists(mod.look.Downloads) ? mod.look.Downloads : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"); }
 
     // Their newest pictures first, with small previews, so one they just downloaded is right there; then Windows' own picker.
@@ -6424,7 +6411,6 @@ public class CapriInternalBrowser : ICapriMod
         else if (e.Button == MouseButtons.Left) Select(t);
         else if (e.Button == MouseButtons.Right) TabMenu(t).Show(Cursor.Position);
       };
-      // Dragged sideways, the tab follows the mouse and the others glide out of its way.
       int downX = 0, grab = 0;
       bool moved = false;
       MouseEventHandler down = (sender, e) => { if (e.Button == MouseButtons.Left) { downX = Cursor.Position.X; moved = false; } };
@@ -6458,11 +6444,9 @@ public class CapriInternalBrowser : ICapriMod
         {
           Haze(chip, g);
           using (var line = new Pen(mod.look.Shade(6))) g.DrawLine(line, chip.Width - 1, 6, chip.Width - 1, chip.Height - 6);
-          // The other half of a split screen: a line under it, fainter than the picked tab's.
           if (Split && (t == splitA || t == splitB)) using (Pen half = new Pen(Color.FromArgb(150, mod.look.Shade(4)), 2)) g.DrawLine(half, 8, chip.Height - 1, chip.Width - 8, chip.Height - 1);
           return;
         }
-        // Just picked: a flash that fades, and the corner bracket springs out and back.
         if (t.Pop > 0) using (SolidBrush flash = new SolidBrush(Color.FromArgb((int)(70 * t.Pop), mod.look.Shade(5)))) g.FillRectangle(flash, 0, 0, chip.Width, chip.Height);
         int arm = 9 + (int)(10 * t.Pop);
         using (var bracket = new Pen(mod.look.Shade(4), 2)) { g.DrawLine(bracket, 1, 1, arm, 1); g.DrawLine(bracket, 1, 1, 1, arm); }
@@ -6480,7 +6464,6 @@ public class CapriInternalBrowser : ICapriMod
       GrowChip(t);
     }
 
-    // Tabs share the strip, narrowing as more open, like any browser.
     void SizeChips()
     {
       if (tabs.Count == 0) return;
@@ -6687,7 +6670,6 @@ public class CapriInternalBrowser : ICapriMod
       Remember();
     }
 
-    // A closed tab's page: hidden at once, let go a moment later.
     void DropViewer(Tab t)
     {
       Control page = t.Viewer.Control;
@@ -6738,7 +6720,6 @@ public class CapriInternalBrowser : ICapriMod
       chipHold.Start();
     }
 
-    // A tab moved to a new place in the strip.
     internal void MoveTab(Tab t, int to)
     {
       int from = tabs.IndexOf(t);
@@ -6798,7 +6779,6 @@ public class CapriInternalBrowser : ICapriMod
       glide.Start();
     }
 
-    // Her brain's split, unsplit and snooze.
     internal string TabsSaid(string verb)
     {
       if (tab == null) return "There's no tab open.";
@@ -7078,7 +7058,6 @@ public class CapriInternalBrowser : ICapriMod
       row("\uE8F8", adsOn ? t.Viewer.Stopped : 0, "pop-ups, redirects and invisible layers stopped");
       y += 6;
 
-      // The tracker list folds open, like a details row.
       List<string> who;
       lock (t.Viewer.TrackerHosts) who = new List<string>(t.Viewer.TrackerHosts);
       var fold = new Label { Text = "List of blocked trackers", Left = 20, Top = y, Width = 300, Height = 26, ForeColor = ink, BackColor = back, Font = new Font(UiBold, 10f), Cursor = Cursors.Hand };
@@ -7119,7 +7098,6 @@ public class CapriInternalBrowser : ICapriMod
       Point under = shield.PointToScreen(new Point(shield.Width, shield.Height + 4));
       drop.Show(new Point(Math.Max(0, under.X - card.Width), under.Y));
     }
-
 
     // ---- The lock: site info like Opera's. Connection, cookies and site data, and the site's own settings. ----
     void LockPanel(Tab t)
@@ -7171,7 +7149,6 @@ public class CapriInternalBrowser : ICapriMod
         card.Controls.Add(row);
         y += 44;
       };
-      // The top: the site's name (or a back arrow and the page's name), and the close cross.
       Action<string, Action> top = (title, backTo) =>
       {
         if (backTo != null)
@@ -7298,7 +7275,6 @@ public class CapriInternalBrowser : ICapriMod
 
     void RefreshSettingsTabs() { foreach (Tab open in tabs) if (open.Special == "settings") ShowReader(open); }
 
-    // From the lock: Settings, on this site's own page.
     void OpenSiteSettings(string host)
     {
       settingsSite = PermHost(host);
@@ -7350,7 +7326,6 @@ public class CapriInternalBrowser : ICapriMod
 
     static string SettingsExtraCss(Look look)
     {
-      // The rest of its styling is in settings.css.
       return "<style>.tb{position:fixed;opacity:0;pointer-events:none;animation:none!important}.tb.on{opacity:1}</style>" + TipBox(look);
     }
 
@@ -7447,7 +7422,6 @@ public class CapriInternalBrowser : ICapriMod
       }
       return false;
     }
-
 
     // ---- Capri Cleaner: in Settings > Privacy ----
     long cacheBytes = -1;
@@ -7667,7 +7641,6 @@ public class CapriInternalBrowser : ICapriMod
       Button b = Tool("", 36, "Downloads (Ctrl+J)", DockStyle.Right);
       b.Font = Icons(11f);
       downloadsButton = b;
-      // A thin red bar under the arrow while something downloads.
       b.Paint += (sender, e) =>
       {
         long have = 0, want = 0;
@@ -7800,7 +7773,6 @@ public class CapriInternalBrowser : ICapriMod
       drop.Show(new Point(Math.Max(0, at.X - wide), at.Y));
     }
 
-
     // ---- Right-click on Speed Dial: a small menu like a gaming browser's ----
     Button puzzleButton;
 
@@ -7848,7 +7820,6 @@ public class CapriInternalBrowser : ICapriMod
       internal double Run(double x) { double y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2; x2 = x1; x1 = x; y2 = y1; y1 = y; return y; }
     }
 
-    // Fades in over a few milliseconds, then dies away smoothly to nothing by the end.
     static double Envelope(int i, int count, double attack)
     {
       double t = i / (double)count, rise = Math.Min(1, i / Math.Max(1, attack * BlipRate));
@@ -7869,7 +7840,6 @@ public class CapriInternalBrowser : ICapriMod
       }
     }
 
-    // Noise through a filter: whooshes, ticks and the click of a key.
     static void Hiss(float[] into, double start, double length, Filter filter, double loud)
     {
       int first = (int)(start * BlipRate), count = (int)(length * BlipRate);
@@ -8381,7 +8351,6 @@ public class CapriInternalBrowser : ICapriMod
       });
     }
 
-    // Weak (short) or used on more than one site.
     bool Risky(Login l)
     {
       if (l.Pass.Length < 8) return true;
@@ -8788,7 +8757,6 @@ public class CapriInternalBrowser : ICapriMod
       return rows;
     }
 
-
     // ---- Capri's brain first (Settings > Mods, on unless they switch it off) ----
     // Capri's own process gets the PC first, and Edge's engine processes behind this browser wait their turn.
     WinTimer brainTimer;
@@ -8844,7 +8812,6 @@ public class CapriInternalBrowser : ICapriMod
       else if (!playing && gameMode && autoGame && ++autoOff >= 2) { autoGame = false; GameMode(false); }
     }
 
-    // Game mode on or off, and what she says about it.
     internal string GameMode(bool on)
     {
       gameMode = on;
@@ -8857,7 +8824,6 @@ public class CapriInternalBrowser : ICapriMod
       return "Game mode's on, choom. " + (n > 0 ? "I snoozed " + n + (n == 1 ? " tab" : " tabs") + " and I'm" : "I'm") + " running super low so your game gets the PC.";
     }
 
-    // The game mode button lit in her cyan while it's on.
     void GameLook()
     {
       if (gameBtn == null) return;
@@ -8976,7 +8942,6 @@ public class CapriInternalBrowser : ICapriMod
       mod.look.Ads = on;
       Guard();
     }
-    // What the window shows as its title: the tab in front's.
     internal Action<string> TitleChanged;
     readonly List<string> closed = new List<string>();
     bool full, byKey;
@@ -9348,7 +9313,6 @@ public class CapriInternalBrowser : ICapriMod
       try { g.Viewer.Script(js.Append("])").ToString()); } catch { }
     }
 
-    // Redraws any open Games page (after its settings or games change).
     void RefreshGames() { foreach (Tab open in tabs) if (open.Special == "games") ShowReader(open); }
 
     void ShowGames()
@@ -9362,7 +9326,6 @@ public class CapriInternalBrowser : ICapriMod
       ShowReader(tab);
     }
 
-    // A downloaded game's saved file, a line at a time.
     string[] Lines(string id)
     {
       var all = new List<string>();
@@ -9786,7 +9749,6 @@ public class CapriInternalBrowser : ICapriMod
       mod.Tell(said);
     }
 
-    // 3, 2, 1, go: then the start page opens and the clock runs.
     WinTimer countdown;
 
     void CancelRace()
@@ -9950,7 +9912,6 @@ public class CapriInternalBrowser : ICapriMod
 
     // ---- typing race: a paragraph from the page they were reading, typed against the clock ----
 
-
     void TypingRace()
     {
       // No text from their pages: the game picks one of its own paragraphs.
@@ -10106,7 +10067,6 @@ public class CapriInternalBrowser : ICapriMod
       return got[1].Length > 0 ? got[1] : got[0] == "ok" ? "You're on the boards, choom." : "That didn't go through, choom. Try again in a bit.";
     }
 
-    // Which of the six numbers go on the boards: click one to keep it off (or put it back).
     string BoardPicks()
     {
       var b = new StringBuilder();
@@ -10342,7 +10302,6 @@ public class CapriInternalBrowser : ICapriMod
       return html.Append("</div></body></html>").ToString();
     }
 
-    // What's new, under Update all in Settings.
     string News() { string n = Kept("whats-new").Trim(); return n.Length == 0 ? "" : "<div class=\"s pre\" style=\"white-space:pre-wrap;margin-top:12px\"><b>WHAT'S NEW</b>\n" + Esc(n.Length > 3000 ? n.Substring(0, 3000) : n) + "</div>"; }
 
     // ---- the settings page: one clean web page in a tab of its own (the old panel is only for PCs without Edge's engine) ----
@@ -10362,7 +10321,6 @@ public class CapriInternalBrowser : ICapriMod
     // The job Capri learn just rewrote, shown in its open form till it's saved.
     int draftAt = -1;
     Job draft;
-    // How each step went the last time it was tested.
     string TestNote(Look look, string trigger)
     {
       List<string[]> log;
@@ -10380,7 +10338,6 @@ public class CapriInternalBrowser : ICapriMod
       return "<p class='warn'>Last time, Capri didn't know how to do " + Esc(missed) + ". Try wording it like the chips below.</p>";
     }
 
-    // Steps you can click to add on the Custom jobs page.
     internal static readonly string[] JobChips = { "open youtube.com", "open any website", "play", "pause", "full screen", "volume 40", "speed 1.5", "next video", "skip 2 minutes", "click Shuffle", "scroll down", "search lofi beats", "type hello in the search box", "press enter", "find me a lofi playlist", "new tab", "summarise", "check the comments", "read it out", "screenshot to notes", "remind me in 20 minutes to stretch", "wait 5", "wait 10 to 20 seconds", "listen for \"skip\" = next video", "listen for \"pause\" = pause job", "repeat 10 times", "repeat forever", "wait for it to load", "ask Ready?", "say Let's go, choom" };
 
     // Custom jobs: a header, how to word one (folded away once you've got some), each of theirs as a card, and a new one.
@@ -10447,7 +10404,6 @@ public class CapriInternalBrowser : ICapriMod
 
     static string Esc(string text) { return WebUtility.HtmlEncode(text ?? ""); }
 
-
     // ---- Settings: hover a setting for a little box saying what it does ----
     // What a setting's hover box says, from the "tip" lines in data/lists.txt (none until it's downloaded).
     static string TipFor(string name, string about)
@@ -10486,7 +10442,6 @@ public class CapriInternalBrowser : ICapriMod
     internal static readonly string[] AnimeHosts = { "crunchyroll.com", "youtube.com", "netflix.com", "primevideo.com", "custom" }, AnimeNames = { "Crunchyroll", "YouTube", "Netflix", "Prime Video", "Custom link..." };
     internal static readonly string[] VideoHosts = { "youtube.com", "tiktok.com", "twitch.tv", "netflix.com", "primevideo.com", "custom" }, VideoNames = { "YouTube", "TikTok", "Twitch", "Netflix", "Prime Video", "Custom link..." };
 
-    // The box for a custom site's link, under its choice.
     string LinkRow(string key, string title)
     {
       if (Kept(key + "site") != "custom") return "";
@@ -10522,7 +10477,6 @@ public class CapriInternalBrowser : ICapriMod
         return rows.ToString();
       };
 
-      // Appearance: screen mode, font, text size, websites, wallpaper.
       html.Append(open(0)).Append("<div class='th'>");
       foreach (string theme in Look.ThemeNames)
       {
@@ -10560,7 +10514,6 @@ public class CapriInternalBrowser : ICapriMod
         .Append(LinkRow("video", "Custom video site"))
         .Append(extras("video")).Append("</div>");
 
-      // Privacy & security: tracking, ads, warnings, clearing data, and each site's settings.
       List<string> levels = new List<string>(), levelNames = new List<string>();
       for (int i = 0; i < 4; i++) { levels.Add(i.ToString()); levelNames.Add(T(37 + i)); }
       html.Append(open(4)).Append(Row(T(36), "Strict may break some sites.", Pick("track", levels, levelNames, look.Track.ToString(), false)));
@@ -10689,7 +10642,6 @@ q.addEventListener('keydown',function(e){if(e.key=='ArrowDown'){e.preventDefault
 document.addEventListener('keydown',function(e){if(e.target!==q&&(e.key=='/'||(e.ctrlKey&&e.key=='f'))){e.preventDefault();q.focus();q.select()}});
 go();q.focus()})();";
 
-    // Right-click a page: Delete from history.
     const string HistMenu = @"(function(){var m=document.createElement('div');m.className='hm';m.innerHTML='<a>Delete from history</a>';document.body.appendChild(m);var on=null;
 function shut(){m.classList.remove('on');on=null}
 document.addEventListener('contextmenu',function(e){var a=e.target.closest&&e.target.closest('.hist a.v[data-k]');if(!a){shut();return}e.preventDefault();on=a;m.style.left=Math.min(e.clientX,innerWidth-200)+'px';m.style.top=Math.min(e.clientY,innerHeight-50)+'px';m.classList.add('on')});
@@ -10758,7 +10710,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       t.Viewer.Text(text => { mod.Summarise(title, at, text, done, question); });
     }
 
-    // The bar turns into a question box for the page in front.
     void StartAsking()
     {
       Tab t = tab;
@@ -10950,7 +10901,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       }
     }
 
-    // Every part of the browser gets her pointer, except the boxes you type in.
     void UsePointer(Control c)
     {
       if (!(c is TextBoxBase) && !(c is ComboBox) && !(c is WebBrowser) && c.GetType().Name != "WebView2" && !"grip".Equals(c.Tag)) c.Cursor = Pointer;
@@ -11042,7 +10992,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       return false;
     }
 
-
     // ---- For "find it cheaper": where the mouse is on the page, and a comparison tab that opens behind the one they're on ----
     internal string PointerOnPage()
     {
@@ -11119,7 +11068,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
         g.FillRectangle(back, 0, 0, c.Width, c.Height);
     }
 
-    // A logo in her red: its light parts bright red, its dark parts dark red.
     Bitmap Reddened(Bitmap logo)
     {
       Color red = mod.look.Shade(5);
@@ -11189,7 +11137,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       clock.Start();
     }
 
-    // Menus and panels under buttons fade in instead of popping up.
     static void FadeIn(ToolStripDropDown menu)
     {
       menu.Opening += delegate { try { menu.Opacity = .15; } catch { } };
@@ -11257,7 +11204,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       foreach (Panel p in new[] { notes, marks, pwPanel, sideSetup }) if (p.Visible && p.Dock != DockStyle.Left && !PinnedSide(p) && Form.ActiveForm == FindForm()) SlideIn(p, p.Width);
     }
 
-    // The top of a side panel: its icon and name, a pin, and close.
     Panel SideHead(Panel p, string glyph, string name, out Label title)
     {
       var head = new Panel { Dock = DockStyle.Top, Height = 52 };
@@ -11335,7 +11281,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       return row;
     }
 
-    // Dark scrollbars and tree arrows on dark looks.
     void DarkScroll(Control c)
     {
       Action theme = delegate { try { SetWindowTheme(c.Handle, mod.look.Shade(1).GetBrightness() < .5f ? "DarkMode_Explorer" : "Explorer", null); } catch { } };
@@ -11362,7 +11307,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       Ease(slider, 190, e => { if (my != slides) return; slider.Left = fromX + (int)((toX - fromX) * e); slider.Width = fromW + (int)((toW - fromW) * e); }, null);
     }
 
-    // A new tab grows into the strip.
     void GrowChip(Tab t)
     {
       Panel chip = t.Chip;
@@ -11379,7 +11323,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       }, delegate { SizeChips(); });
     }
 
-    // A closed tab shrinks away instead of vanishing.
     void ShrinkChip(Panel gone, bool settle)
     {
       gone = Ghost(gone);
@@ -11453,7 +11396,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       return at.ToString(at.Year == DateTime.Today.Year ? "d MMM HH:mm" : "d MMM yyyy");
     }
 
-    // The day divider over a run of notes.
     static string Day(long ticks)
     {
       if (ticks <= 0) return "EARLIER";
@@ -11585,7 +11527,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       catch (Exception error) { mod.Tell("I couldn't restore it: " + error.Message); }
     }
 
-    // A card's outline: cut corners top left and bottom right.
     static Point[] CutEdge(int x, int y, int w, int h, int cut) { return new[] { new Point(x + cut, y), new Point(x + w - 1, y), new Point(x + w - 1, y + h - 1 - cut), new Point(x + w - 1 - cut, y + h - 1), new Point(x, y + h - 1), new Point(x, y + cut) }; }
 
     void BuildNoted()
@@ -11681,7 +11622,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
         g.Clear(look.Shade(1));
         if (pillAt.Count != pillNames.Count) layPills();
         int now = pillNow();
-        // The lit pill's fill slides from the last one picked.
         if (now >= 0 && markX >= 0)
           using (var lit = new SolidBrush(Mix(look.Shade(1), look.Shade(5), .22f))) using (Pen edge = new Pen(look.Shade(5)))
           {
@@ -11812,12 +11752,10 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
           {
             int full = TextRenderer.MeasureText(text, body, new Size(inner, 0), Wrap).Height, show = row.Long && !row.Open ? Folded : full;
             TextRenderer.DrawText(g, text, body, new Rectangle(Pad, y, inner, show), ink, Wrap | TextFormatFlags.EndEllipsis);
-            // A folded note fades out at the bottom, with Show more under it.
             if (row.Long && !row.Open)
               using (var fade = new LinearGradientBrush(new Rectangle(1, y + show - 40, w - 2, 41), Color.FromArgb(0, back), back, 90f))
                 g.FillRectangle(fade, 1, y + show - 39, w - 2, 40);
             y += show;
-            // A small notch to open or fold it (the whole line can be clicked).
             if (row.Long)
             {
               int nx = w / 2 - 24;
@@ -11956,7 +11894,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
             int a = (int)(255 * row.Hover);
             using (var bar = new SolidBrush(Color.FromArgb(a, look.Shade(5)))) g.FillRectangle(bar, Side, y + 10, 3, ch - 20);
             using (var edge = new Pen(Color.FromArgb(a, Mix(look.Shade(6), look.Shade(5), .6f)))) g.DrawPolygon(edge, CutEdge(Side, y, w, ch, 10));
-            // Edit, Copy and Delete, top right.
             string[] icons = { "", "", "" };
             Color back = Mix(look.Shade(1), look.Shade(5), .05f);
             for (int k = 0; k < 3; k++)
@@ -11975,7 +11912,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
           int bw = near ? 6 : 3;
           using (var b1 = new SolidBrush(Color.FromArgb((int)(barShow * (near ? 230 : 150)), near ? look.Shade(5) : look.Shade(3)))) g.FillRectangle(b1, feed.ClientSize.Width - bw - 3, at + 2, bw, thumb - 4);
         }
-        // Undo, after a delete.
         undoRect = Rectangle.Empty;
         if (DateTime.Now < undoUntil)
         {
@@ -12044,7 +11980,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
         undoUntil = DateTime.Now.AddSeconds(6);
         all.RemoveAt(i); plain.RemoveAt(i); books.RemoveAt(i); edited.RemoveAt(i); ids.RemoveAt(i);
         store();
-        // The card fades out and the ones under it close the gap.
         int r = rows.FindIndex(x => x.Id == id);
         if (r >= 0)
         {
@@ -12180,7 +12115,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       cue.Click += delegate { noteText.Focus(); };
       Action hint = delegate { bool show = noteText.TextLength == 0 && !noteText.Focused; if (cue.Visible != show) { cue.Visible = show; noteText.Invalidate(); } };
       noteText.TextChanged += delegate { hint(); };
-      // It grows with what's written (smoothly), up to a point, then scrolls.
       int grow = 0;
       noteText.ContentsResized += (sender, e) =>
       {
@@ -12254,7 +12188,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
         try { if (held != null) Clipboard.SetDataObject(held, true); } catch { }
       };
 
-      // Sends what's in the box as a new card (or saves the card being edited).
       Action post = delegate
       {
         bool pic = noteText.Rtf.Contains("\\pict");
@@ -12460,7 +12393,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       DarkScroll(noteText);
     }
 
-    // Links in Noted: web pages open as a tab, files show in File Explorer.
     void OpenLink(string link)
     {
       if (link.StartsWith("file:", Loose))
@@ -12574,7 +12506,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       Panel ring = (Panel)findRow.Controls[0];
       var shut = new Button();
 
-      // Add this page, a new folder, and bringing them over from another browser.
       var tools = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 34, Padding = new Padding(10, 0, 10, 4), WrapContents = false };
       Func<string, string, Button> tool = (words, tip) =>
       {
@@ -13711,7 +13642,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     string chatFull = "";
     int chatShown;
     WinTimer chatType;
-    // The message card's colours, from the theme.
     Color HoloCyan { get { return mod.look.Shade(4); } }
     Color HoloDim { get { return mod.look.Shade(3); } }
     Color HoloRed { get { return mod.look.Shade(5); } }
@@ -13727,7 +13657,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     }
     const int ChatWide = 340;
 
-    // Her box's outline: cut corners top left and bottom right, like Holocall's.
     static Point[] HoloEdge(int w, int h) { return new[] { new Point(12, 0), new Point(w - 1, 0), new Point(w - 1, h - 13), new Point(w - 13, h - 1), new Point(0, h - 1), new Point(0, 12) }; }
 
     // Her box under her hologram: who it's about, then "CAPRI: ..." typed out in cyan with a blinking block, a picture of a typed reply when
@@ -13759,7 +13688,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
         chatCard = c;
         Controls.Add(c);
         c.BringToFront();
-        // Typed out a couple of letters at a time, then the block blinks.
         var typing = new WinTimer { Interval = 22 };
         chatType = typing;
         typing.Tick += delegate
@@ -13782,7 +13710,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       LayOutChatCard();
     }
 
-    // A picture of a typed reply in her box, or none. The old picture is thrown away.
     internal void ChatShot(Image shot)
     {
       if (chatShot == null || chatShot.IsDisposed) { if (shot != null) shot.Dispose(); return; }
@@ -14119,7 +14046,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     // Settings open as a page of their own.
     internal bool SettingsShown { get { return false; } set { if (value) WebSettings(); } }
 
-
     // Key, words, on by default, and the part of Settings it shows in.
     static readonly string[,] ExtraList =
     {
@@ -14165,9 +14091,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       { "formfill", "Fill in forms for you", "1", "research" }
     };
 
-
-
-
     void TintSide(Look look)
     {
       side.BackColor = look.Shade(0);
@@ -14179,7 +14102,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       foreach (Label l in noteBits) l.ForeColor = look.Shade(3);
       noteTint();
       foreach (Label l in labels) l.ForeColor = "title".Equals(l.Tag) ? look.Shade(5) : look.Shade(3);
-      // = look.Shade(2); r.BackColor = look.Shade(1); r.FlatAppearance.CheckedBackColor = look.Shade(5); r.FlatAppearance.BorderColor = look.Shade(6); }
       foreach (Button b in sideButtons)
       {
         b.BackColor = Color.Transparent;
@@ -14193,7 +14115,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
 
     readonly HashSet<Control> hot = new HashSet<Control>();
 
-
     static GraphicsPath Clipped(RectangleF b, bool left)
     {
       var p = new GraphicsPath();
@@ -14204,7 +14125,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       return p;
     }
 
-
     void Watch(Control c)
     {
       c.MouseEnter += delegate { hot.Add(c); c.Invalidate(); };
@@ -14212,17 +14132,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       c.MouseMove += delegate { c.Invalidate(); };
     }
 
-
     // ---- settings as a tab of its own: a section list on the left, the settings on a framed card, her backdrop behind ----
-
-
-
-
-
-
-
-
-
 
     internal bool Full { get { return full; } }
 
@@ -14256,7 +14166,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       into.Add(item);
     }
 
-    // The ≡ button: everything a browser's main menu has.
     internal ContextMenuStrip PageMenu()
     {
       ContextMenuStrip m = NewMenu();
@@ -14300,7 +14209,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       mod.Restart(FindForm(), tab == null || tab.Private ? null : tab.Address, between);
     }
 
-    // Right-click a tab.
     internal ContextMenuStrip TabMenu(Tab t)
     {
       ContextMenuStrip m = NewMenu();
@@ -14340,7 +14248,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       Retitle(t, t.Title);
     }
 
-    // Google Translate's page, in the language Capri Browser is set to.
     internal void Translate(Tab t)
     {
       if (t == null || t.OnReader || t.Address == null) return;
@@ -14348,7 +14255,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       Go(t, "https://translate.google.com/translate?sl=auto&tl=" + hl + "&u=" + Uri.EscapeDataString(t.Address));
     }
 
-    // The page as a picture, in Pictures\Capri Browser, shown in File Explorer.
     Action<string, Image> snapNote;
     Action<string> textNote;
     string warnedHost;
@@ -14441,7 +14347,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
         .Append("</body></html>").ToString();
     }
 
-    // A screenshot of the page in front, put into Noted with the page's name and link.
     internal void ShotToNotes(Tab t)
     {
       Bump("shots", 1);
@@ -14527,7 +14432,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       if (with == null || !with.Viewer.Clear(done)) mod.Tell("Edge's engine isn't running yet, so there's nothing to clear right now, choom.");
     }
 
-    // The faded hint in the empty bar.
     void Cue()
     {
       if (!address.IsHandleCreated) return;
@@ -14580,8 +14484,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     internal string LastShot;
     internal static bool ShowShots = true;
 
-
-
     void Relabel()
     {
       foreach (Action say in words) say();
@@ -14590,8 +14492,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       Cue();
       foreach (Tab t in tabs) if (t.OnReader && t.Address == null) ShowReader(t);
     }
-
-
 
     static int fetching;
     static bool edgeBroken;
@@ -14633,8 +14533,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       videoError = null;
       if (VideoInstalled(mod.Folder)) Rebuild(); else GetEdge();
     }
-
-
 
     // ---- Capri's hologram when she talks (Settings > Mods) ----
     // It borrows the call screen from Issei's Holocall mod, which they install from the Capri app's mod browser: her face, its animation and the
@@ -15167,7 +15065,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       RefreshHomes();
     }
 
-    // The pencil on a Speed Dial tile.
     void TileMenu(int i, string site)
     {
       ContextMenuStrip m = NewMenu();
@@ -15283,7 +15180,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       if (url != null) { Go(tab, url); tab.Viewer.Control.Focus(); }
     }
 
-    // A setting changed: save it, recolour the bar, and redo every page.
     void Changed()
     {
       mod.Save();
@@ -15433,8 +15329,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       }
     }
 
-
-
     // Windows 11's title bar in her colours: dark with her near-black, or light.
     internal void Tint()
     {
@@ -15455,7 +15349,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     }
   }
 
-  // Menus in her colours.
   internal sealed class MenuColors : ProfessionalColorTable
   {
     readonly Look look;
@@ -15495,7 +15388,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
 
     protected override void Dispose(bool disposing) { if (disposing) tick.Dispose(); base.Dispose(disposing); }
 
-    // 0..1 of the way from a to b (in ms), eased.
     static float Part(double ms, double a, double b) { double t = Math.Max(0, Math.Min(1, (ms - a) / (b - a))); return (float)(1 - Math.Pow(1 - t, 3)); }
 
     static Point[] Edge(float x, float y, float w, float h)
@@ -15513,7 +15405,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
       const float W = 330, H = 140;
       float cx = Width / 2f, cy = Height / 2f;
-      // The projector line: grows out from the middle, flickering as it catches.
       float open = Part(ms, 0, 300) * (1 - Part(ms, 1660, 1850));
       float tall = Part(ms, 260, 600) * (1 - Part(ms, 1480, 1660));
       bool flick = ms < 260 && dice.Next(3) == 0;
@@ -15625,7 +15516,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       Color accent = l.Shade(4);
       using (var fill = new SolidBrush(hover || working ? l.Shade(6) : l.Shade(0))) g.FillRectangle(fill, r);
 
-      // The sheen: a soft band of her cyan sliding left to right.
       int p = frame % Period;
       if (p < Sweep)
       {
@@ -15653,7 +15543,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       using (var red = new Pen(l.Shade(5), 2f)) { g.DrawLine(red, r.Left, r.Top + 1, r.Left + 7, r.Top + 1); g.DrawLine(red, r.Left + 1, r.Top, r.Left + 1, r.Top + 7); }
       using (var cyan = new Pen(accent, 2f)) { g.DrawLine(cyan, r.Right - 7, r.Bottom - 1, r.Right, r.Bottom - 1); g.DrawLine(cyan, r.Right - 1, r.Bottom - 7, r.Right - 1, r.Bottom); }
 
-      // The spark: a little four-point star that breathes.
       float cx = r.Left + 14, cy = r.Top + r.Height / 2f;
       float big = 4.2f + (float)((Math.Sin(frame / (working ? 4.0 : 14.0)) + 1) * (working ? 1.3 : 0.6));
       float small = big * 0.32f;
@@ -15720,7 +15609,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       using (var r2 = new Pen(red, 2f)) { g.DrawLine(r2, 1, 1, 10, 1); g.DrawLine(r2, 1, 1, 1, 10); }
       using (var c2 = new Pen(accent, 2f)) { g.DrawLine(c2, r.Right - 10, r.Bottom - 1, r.Right, r.Bottom - 1); g.DrawLine(c2, r.Right - 1, r.Bottom - 10, r.Right - 1, r.Bottom); }
 
-      // The orbit: three sparks with fading trails round a breathing core.
       float cx = 28, cy = Height / 2f;
       for (int k = 0; k < 3; k++)
         for (int trail = 5; trail >= 0; trail--)
@@ -15735,14 +15623,12 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
         new PointF(cx, cy + big), new PointF(cx - small, cy + small), new PointF(cx - big, cy), new PointF(cx - small, cy - small) };
       using (var core = new SolidBrush(l.Shade(2))) g.FillPolygon(core, star);
 
-      // The words: what she's doing, and which step.
       string title = (Head ?? "CAPRI // THINKING") + (Still ? "" : new string('.', 1 + frame / 10 % 3));
       TextRenderer.DrawText(g, title, head, new Rectangle(52, 8, Width - 60, 14), red, TextFormatFlags.Left | TextFormatFlags.NoPadding);
       if (Head != null) TextRenderer.DrawText(g, "\u2715", head, new Rectangle(Width - 24, 7, 16, 14), l.Shade(2), TextFormatFlags.NoPadding);
       if (steps > 0) TextRenderer.DrawText(g, Head != null ? step + "%" : step + "/" + steps, head, new Rectangle(52, 8, Width - (Head != null ? 84 : 62), 14), l.Shade(3), TextFormatFlags.Right | TextFormatFlags.NoPadding);
       TextRenderer.DrawText(g, doing, body, new Rectangle(52, 22, Width - 62, 18), l.Shade(2), TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
 
-      // The bar: how far through, or a sweep of her cyan.
       var bar = new Rectangle(52, Height - 12, Width - 62, 3);
       using (var track = new SolidBrush(l.Shade(6))) g.FillRectangle(track, bar);
       if (steps > 0) using (SolidBrush done = new SolidBrush(accent)) g.FillRectangle(done, bar.Left, bar.Top, (int)(bar.Width * Math.Min(1f, shown / steps)), bar.Height);
@@ -15780,13 +15666,11 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     public virtual void Dark(bool on) { }
     public virtual void Blurred(bool on) { }
     public virtual void Downloads() { }
-    // Sound: the page started or stopped making sound, or was muted (playing, muted).
     public Action<bool, bool> Sound;
     // Blocks: how many ads it has blocked on this page so far.
     public Action<int> Blocks;
     // Shield: something the page shield did or saw, like "layer", "popup", "redirect", "fake", "scam" or "skip|ad|x,y".
     public Action<string> Shield;
-    // Trackers: how many trackers it has stopped on this page, and which.
     public Action<int> Tracks;
     public readonly List<string> TrackerHosts = new List<string>();
     public int Stopped;
@@ -15870,7 +15754,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     public Action<int> Crashed;
     // Typed: a key was pressed on the page (only for typing sounds).
     public Action Typed;
-    // Escaped: Esc was pressed on the page.
     public Action Escaped;
     // A key pressed while the page has focus: true when Capri Browser used it.
     public Func<Keys, bool> Key;
@@ -16012,7 +15895,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
           });
         }
         catch { }
-        // A video's full screen button: the window goes full screen with it.
         Hook(core, "ContainsFullScreenElementChanged", delegate { if (FullScreen != null) FullScreen((bool)Get(core, "ContainsFullScreenElement")); });
         // Saved passwords and form filling, like Edge.
         try
@@ -16110,7 +15992,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
           }
           catch { }
         });
-        // Her mouse pointer on web pages too.
         try { if (PagePointer().Length > 0) { Call(core, "AddScriptToExecuteOnDocumentCreatedAsync", PagePointer()); Call(core, "ExecuteScriptAsync", PagePointer()); } } catch { }
         Hook(core, "WebResourceRequested", asked =>
         {
@@ -16499,7 +16380,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     const string EndedScript = "(function(){function f(e){var v=e.target;if(!v||v.tagName!='VIDEO'||!(v.duration>45)||!isFinite(v.duration))return;if(e.type=='timeupdate'&&v.currentTime<v.duration*0.9)return;var k=v.currentSrc||'v';if(v.__capriDone===k)return;v.__capriDone=k;if(window.chrome&&chrome.webview)chrome.webview.postMessage((v.duration>360?'capri-endedL|':'capri-ended|')+document.title);}document.addEventListener('ended',f,true);document.addEventListener('timeupdate',f,true);})();";
     Task<string> darkId;
 
-    // Dark mode for sites that are bright: on now and for every page after, or off again.
     public override bool Sleep() { if (core == null) return false; try { Call(core, "TrySuspendAsync"); return true; } catch (Exception) { return false; } }
     // Game mode: Edge keeps this page's memory as low as it can (its Low level), or back to Normal.
     public override void Saver(bool low)
@@ -16647,7 +16527,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       return true;
     }
 
-
     // Site settings, pushed into Edge's own permission store so an earlier "Allow" doesn't stick around.
     public override void Permit(int kind, string host, string value)
     {
@@ -16727,7 +16606,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       catch (Exception error) { done(Inner(error).Message); }
     }
 
-
     public override int EngineId { get { try { return core == null ? 0 : Convert.ToInt32(Get(core, "BrowserProcessId")); } catch (Exception) { return 0; } } }
 
     // Clears kinds of Edge's browsing data by name, like "DiskCache, CacheStorage".
@@ -16750,7 +16628,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       }
       catch (Exception error) { done(Inner(error).Message); }
     }
-
 
     public override void Html(string html) { Run(delegate { Call(core, "NavigateToString", html); }); }
     public override void Go(string url) { Run(delegate { Call(core, "Navigate", url); }); }
@@ -17172,7 +17049,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     return found;
   }
 
-  // Wikipedia's search.
   public static List<Result> Encyclopedia(string json)
   {
     var found = new List<Result>();
@@ -17260,11 +17136,9 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
 
   // Her brain's answer on one line, without markdown bold.
   static string BrainLine(string answer) { return Regex.Replace(answer ?? "", @"\s+", " ").Replace("**", "").Trim(); }
-  // The theme's colours put into a stylesheet's %C0%, %C1%... spots.
   static string Colored(string css, string[] c) { for (int i = 0; i < c.Length; i++) css = css.Replace("%C" + i + "%", c[i]); return css; }
   // A header's text in the theme's colours (red parts stay red), but not its title.
   static void TintHead(Control head, Control title, Look look) { foreach (Control part in head.Controls) if (part != title) part.ForeColor = "red".Equals(part.Tag) ? look.Shade(5) : look.Shade(3); }
-  // What she tells her brain after opening a link in Capri Browser for them.
   const string NoEngine = "That needs Edge's engine, which isn't set up.";
   const string OpenedHere = "Opened it in Capri Browser on their screen instead. If they asked for more than opening it, keep going with the capri_browser tool ('links', then 'click' or 'type'). Otherwise reply with something short like: It's up in Capri Browser, choom.";
   static string Clip(string text, int most) { return text.Length <= most ? text : text.Substring(0, most - 3).TrimEnd() + "..."; }
