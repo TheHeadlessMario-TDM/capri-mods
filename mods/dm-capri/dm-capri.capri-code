@@ -22,13 +22,23 @@ using CapriDesktop;
 
 public class ChatLog : ICapriMod
 {
+    readonly object lifecycle = new object();
+    bool running;
+    int generation;
     ICapriHost capri;
     LogWindow window;
     Opts opts;
 
     public void Start(ICapriHost host)
     {
-        capri = host;
+        int run;
+        lock (lifecycle)
+        {
+            if (running) return;
+            capri = host;
+            running = true;
+            run = ++generation;
+        }
         if (opts == null)
         {
             opts = new Opts(host, "DM Capri!");
@@ -43,7 +53,7 @@ public class ChatLog : ICapriMod
         Feed.TextSize = (float)opts.Num("text", 10.5, 8, 18);
         try
         {
-            host.Ui.AddMenuItem("DM Capri!", Open);
+            host.Ui.AddMenuItem("DM Capri!", delegate { Open(run); });
             if (opts.Flag("button", true)) StartButton();
             capri.Log("DM Capri!: open it from her right-click menu.");
         }
@@ -54,10 +64,20 @@ public class ChatLog : ICapriMod
 
     public void Stop()
     {
-        StopButton();
-        LogWindow w = window;
-        window = null;
-        if (w != null && !w.IsDisposed) w.BeginInvoke((MethodInvoker)delegate { w.Close(); });
+        LogWindow w;
+        lock (lifecycle)
+        {
+            running = false;
+            generation++;
+            StopButton();
+            w = window;
+            window = null;
+        }
+        if (w != null && !w.IsDisposed)
+        {
+            if (w.InvokeRequired) w.BeginInvoke((MethodInvoker)delegate { w.Close(); });
+            else w.Close();
+        }
     }
 
     const BindingFlags Inst = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
@@ -124,54 +144,118 @@ public class ChatLog : ICapriMod
     float drawnScale = -1;
     Rectangle drawnAt;
 
+    int buttonRun;
+    bool buttonRequested;
+    ICapriTimer buttonRetry;
+
     void StartButton()
     {
-        Form f = Her();
-        if (f == null) { capri.Timers.After(1, delegate { if (opts.Flag("button", true) && button == null) StartButton(); }); return; }
-        f.BeginInvoke((MethodInvoker)delegate
+        lock (lifecycle)
         {
-            try
+            if (!running || buttonRequested) return;
+            buttonRequested = true;
+            TryStartButton(buttonRun);
+        }
+    }
+
+    // Called with the lifecycle lock held. One retry or UI callback owns each request.
+    void TryStartButton(int run)
+    {
+        Form f = Her();
+        if (f == null)
+        {
+            buttonRetry = capri.Timers.After(1, delegate
             {
-                herWindow = f;
-                Assembly app = typeof(ICapriHost).Assembly;
-                Type pillType = app.GetType("CapriDesktop.TalkPill", true), look = app.GetType("CapriDesktop.Look", true), overlay = app.GetType("CapriDesktop.Overlay", true);
-                pill = (Form)Need(f.GetType().GetField("pill", Any), "pill").GetValue(f);
-                pillUntil = Need(f.GetType().GetField("pillUntil", Any), "pillUntil");
-                clock = (Stopwatch)Need(f.GetType().GetField("clock", Any), "clock").GetValue(f);
-                talkScale = Need(f.GetType().GetMethod("TalkScale", Any, null, Type.EmptyTypes, null), "TalkScale");
-                plate = Need(pillType.GetMethod("Plate", Any), "TalkPill.Plate");
-                pillCentre = Need(pillType.GetField("centre", Any), "TalkPill.centre");
-                pillScale = Need(pillType.GetField("scale", Any), "TalkPill.scale");
-                chatting = Need(pillType.GetProperty("Chatting", Any), "TalkPill.Chatting");
-                present = Need(overlay.GetMethod("Present", Any), "Overlay.Present");
-                cyan = (Color)Need(look.GetField("Cyan", Any), "Look.Cyan").GetValue(null);
-                ink = (Color)Need(look.GetField("Ink", Any), "Look.Ink").GetValue(null);
-                Cursor pointer = (Cursor)look.GetProperty("Pointer", Any).GetValue(null, null);
-                button = (Form)Activator.CreateInstance(overlay, Any, null, new object[] { "DM Capri!" }, null);
-                button.Cursor = pointer;
-                button.Owner = f;
-                button.MouseUp += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) Open(); };
-                follow = new System.Windows.Forms.Timer { Interval = 15 };
-                follow.Tick += delegate { Follow(); };
-                follow.Start();
-            }
-            catch (Exception e)
+                lock (lifecycle)
+                {
+                    if (run != buttonRun) return;
+                    buttonRetry = null;
+                    TryStartButton(run);
+                }
+            });
+            return;
+        }
+        int modRun = generation;
+        try
+        {
+            f.BeginInvoke((MethodInvoker)delegate
             {
-                // A Capri update that renames one of these just means no button; the menu item still works.
-                capri.Log("DM Capri!: no chat button on this Capri (" + e.Message + ")");
-                StopButton();
-            }
-        });
+                lock (lifecycle)
+                {
+                    if (run != buttonRun) return;
+                    try
+                    {
+                        herWindow = f;
+                        Assembly app = typeof(ICapriHost).Assembly;
+                        Type pillType = app.GetType("CapriDesktop.TalkPill", true), look = app.GetType("CapriDesktop.Look", true), overlay = app.GetType("CapriDesktop.Overlay", true);
+                        pill = (Form)Need(f.GetType().GetField("pill", Any), "pill").GetValue(f);
+                        pillUntil = Need(f.GetType().GetField("pillUntil", Any), "pillUntil");
+                        clock = (Stopwatch)Need(f.GetType().GetField("clock", Any), "clock").GetValue(f);
+                        talkScale = Need(f.GetType().GetMethod("TalkScale", Any, null, Type.EmptyTypes, null), "TalkScale");
+                        plate = Need(pillType.GetMethod("Plate", Any), "TalkPill.Plate");
+                        pillCentre = Need(pillType.GetField("centre", Any), "TalkPill.centre");
+                        pillScale = Need(pillType.GetField("scale", Any), "TalkPill.scale");
+                        chatting = Need(pillType.GetProperty("Chatting", Any), "TalkPill.Chatting");
+                        present = Need(overlay.GetMethod("Present", Any), "Overlay.Present");
+                        cyan = (Color)Need(look.GetField("Cyan", Any), "Look.Cyan").GetValue(null);
+                        ink = (Color)Need(look.GetField("Ink", Any), "Look.Ink").GetValue(null);
+                        Cursor pointer = (Cursor)look.GetProperty("Pointer", Any).GetValue(null, null);
+                        button = (Form)Activator.CreateInstance(overlay, Any, null, new object[] { "DM Capri!" }, null);
+                        button.Cursor = pointer;
+                        button.Owner = f;
+                        button.MouseUp += delegate(object sender, MouseEventArgs e)
+                        {
+                            lock (lifecycle)
+                            {
+                                if (run == buttonRun && e.Button == MouseButtons.Left) Open(modRun);
+                            }
+                        };
+                        follow = new System.Windows.Forms.Timer { Interval = 15 };
+                        follow.Tick += delegate
+                        {
+                            lock (lifecycle) { if (run == buttonRun) Follow(); }
+                        };
+                        follow.Start();
+                    }
+                    catch (Exception e)
+                    {
+                        // A Capri update that renames one of these just means no button; the menu item still works.
+                        capri.Log("DM Capri!: no chat button on this Capri (" + e.Message + ")");
+                        StopButton();
+                    }
+                }
+            });
+        }
+        catch (InvalidOperationException)
+        {
+            // The Companion may have closed after Her() found its handle.
+            StopButton();
+        }
     }
 
     void StopButton()
     {
-        Form f = herWindow;
+        Form f, oldButton;
+        System.Windows.Forms.Timer oldFollow;
+        lock (lifecycle)
+        {
+            buttonRun++;
+            buttonRequested = false;
+            if (buttonRetry != null) { buttonRetry.Cancel(); buttonRetry = null; }
+            f = herWindow;
+            oldButton = button;
+            oldFollow = follow;
+            herWindow = null;
+            pill = null;
+            button = null;
+            follow = null;
+            drawnScale = -1;
+        }
+        if (oldFollow == null && oldButton == null) return;
         MethodInvoker stop = delegate
         {
-            if (follow != null) { follow.Dispose(); follow = null; }
-            if (button != null) { button.Dispose(); button = null; }
-            drawnScale = -1;
+            if (oldFollow != null) oldFollow.Dispose();
+            if (oldButton != null) oldButton.Dispose();
         };
         try { if (f != null && f.IsHandleCreated && f.InvokeRequired) f.BeginInvoke(stop); else stop(); }
         catch (Exception) { }
@@ -281,23 +365,31 @@ public class ChatLog : ICapriMod
         return null;
     }
 
-    void Open()
+    void Open(int run)
     {
-        Form f = Her();
-        if (f != null && f.InvokeRequired) { f.BeginInvoke((MethodInvoker)Open); return; }
-        if (window == null || window.IsDisposed)
+        lock (lifecycle)
         {
-            ICapriHost h = capri;
-            // Pasted screenshots live in the paste mod's folder, beside this one.
-            string pictures = Path.Combine(Directory.GetParent(h.Folder).FullName, "paste-pictures-data");
-            string transcripts = Path.Combine(Directory.GetParent(Directory.GetParent(h.Folder).FullName).FullName, "transcripts");
-            window = new LogWindow(delegate { return h.Chat.Days(); }, delegate(DateTime d) { return h.Chat.Transcript(d); },
-                                   delegate(string text) { h.Chat.Send(text); }, Give, Drop, delegate { return h.Chat.Busy; },
-                                   Face(h), pictures, transcripts, delegate(string s) { h.Log("DM Capri!: " + s); });
+            if (!running || run != generation) return;
+            Form f = Her();
+            if (f != null && f.InvokeRequired)
+            {
+                f.BeginInvoke((MethodInvoker)delegate { Open(run); });
+                return;
+            }
+            if (window == null || window.IsDisposed)
+            {
+                ICapriHost h = capri;
+                // Pasted screenshots live in the paste mod's folder, beside this one.
+                string pictures = Path.Combine(Directory.GetParent(h.Folder).FullName, "paste-pictures-data");
+                string transcripts = Path.Combine(Directory.GetParent(Directory.GetParent(h.Folder).FullName).FullName, "transcripts");
+                window = new LogWindow(delegate { return h.Chat.Days(); }, delegate(DateTime d) { return h.Chat.Transcript(d); },
+                                       delegate(string text) { h.Chat.Send(text); }, Give, Drop, delegate { return h.Chat.Busy; },
+                                       Face(h), pictures, transcripts, delegate(string s) { h.Log("DM Capri!: " + s); });
+            }
+            window.Show();
+            if (window.WindowState == FormWindowState.Minimized) window.WindowState = FormWindowState.Normal;
+            window.Activate();
         }
-        window.Show();
-        if (window.WindowState == FormWindowState.Minimized) window.WindowState = FormWindowState.Normal;
-        window.Activate();
     }
 }
 
