@@ -6648,7 +6648,7 @@ public class CapriInternalBrowser : ICapriMod
       splitBar.Bounds = new Rectangle(mid - 3, 0, 6, high);
       splitBar.Visible = true;
       splitBar.BringToFront();
-      foreach (Panel p in new[] { notes, marks, cleaner, pwPanel, sideSetup }) if (p.Visible && p.Dock != DockStyle.Left) p.BringToFront();
+      foreach (Panel p in new[] { notes, marks, pwPanel, sideSetup }) if (p.Visible && p.Dock != DockStyle.Left) p.BringToFront();
     }
 
     // This tab beside the one in front (or, from the one in front, beside the last one used, or a new tab).
@@ -7449,28 +7449,20 @@ public class CapriInternalBrowser : ICapriMod
     }
 
 
-    // ---- Capri Cleaner: a gaming-browser style cleaner in the sidebar. What's taking space, three presets, and each part. ----
-    readonly Panel cleaner = new Panel();
-    Panel cleanScroll, cleanBody;
-    long cacheBytes = -1, freedBytes = -1;
-    int cookieCount = -1, cleanSpin, cleanHover = -1;
-    bool cleaning, measuring;
-    readonly HashSet<string> cleanOpen = new HashSet<string>();
-    readonly List<KeyValuePair<Rectangle, Action>> cleanHits = new List<KeyValuePair<Rectangle, Action>>();
-    WinTimer cleanTimer;
+    // ---- Capri Cleaner: in Settings > Privacy ----
+    long cacheBytes = -1;
+    bool cleaning;
 
     static readonly string[,] CleanParts =
     {
       { "cache", "Cache", "Pictures and files sites saved so they load faster. Safe to clear: they come back as you browse." },
       { "cookies", "Cookies", "Signs you out of websites. Saved passwords, bookmarks and Speed Dial stay." },
-      { "tabs", "Tabs", "Closes every tab except the one you're on. Reopen closed tab brings them back." },
+      { "tabs", "Tabs", "Closes every tab except the one you're on (or just came from). Reopen closed tab brings them back." },
       { "history", "Browsing history", "The pages you've visited, from History and Edge's own list." },
       { "downloads", "Downloads", "Clears the downloads list. Files it downloaded over 2 weeks ago go to the Recycle Bin, if you say yes." },
       { "catchup", "Capri's day memory", "So she doesn't repeat herself: what changed on pages she's already told you about, and things she's already found you (ask again and you get a new one). Only fingerprints, never the words. Deletes itself after a day anyway." },
       { "memories", "Capri's important memories", "The same, for pages on your Speed Dial or that she's watching for you, kept 30 days so she only tells you what's really new there. Clear it and she'll tell you everything on them again." }
     };
-    static readonly string[][] CleanPresets = { new[] { "cache" }, new[] { "cache", "tabs", "history" }, new[] { "cache", "cookies", "tabs", "history", "downloads", "catchup", "memories" } };
-
     HashSet<string> CleanPicked()
     {
       string saved = Kept("cleanparts");
@@ -7482,80 +7474,34 @@ public class CapriInternalBrowser : ICapriMod
       var keep = new List<string>();
       for (int i = 0; i < CleanParts.GetLength(0); i++) if (picked.Contains(CleanParts[i, 0])) keep.Add(CleanParts[i, 0]);
       Keep("cleanparts", keep.Count == 0 ? "," : string.Join(",", keep.ToArray()));
-      CleanLayout();
     }
 
-    // Which preset the ticked parts match, if any.
-    int CleanPreset()
+    internal void ShowCleaner()
+    {
+      settingsSite = null;
+      settingsJump = "cleaner";
+      WebSettings();
+      if (settingsJump != null) ShowReader(tab);
+    }
+    internal void CleanByVoice() { StartCleaning(); }
+
+    string CleanRows()
     {
       HashSet<string> picked = CleanPicked();
-      for (int i = 0; i < CleanPresets.Length; i++) if (picked.SetEquals(CleanPresets[i])) return i;
-      return -1;
+      var rows = new StringBuilder("<h3 class='sub' id='cleaner'>CAPRI CLEANER</h3>");
+      for (int i = 0; i < CleanParts.GetLength(0); i++) rows.Append(Row(CleanParts[i, 1], CleanParts[i, 2], Switch("clean-" + CleanParts[i, 0], picked.Contains(CleanParts[i, 0]))));
+      return rows.Append(Row("Clean the parts that are on", "Or say “clean up the browser”.", Btn("clean", "Start cleaning", true))).ToString();
     }
 
-    internal void ShowCleaner() { ShowSide(cleaner, cleaner.Width); }
-    internal void CleanByVoice() { ShowCleaner(); Later(delegate { StartCleaning(); }); }
-
-    void BuildCleaner()
-    {
-      int saved;
-      cleaner.Width = int.TryParse(Kept("cleanerwidth"), out saved) ? Math.Max(300, Math.Min(560, saved)) : 340;
-      cleaner.Visible = false;
-      Buffered(cleaner);
-      Label title;
-      Panel head = SideHead(cleaner, "", "Capri Cleaner", out title);
-      cleanScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
-      cleanBody = new Panel { Left = 0, Top = 0, Height = 900 };
-      Buffered(cleanBody);
-      Buffered(cleanScroll);
-      DarkScroll(cleanScroll);
-      cleanScroll.Controls.Add(cleanBody);
-      cleanScroll.Resize += delegate { CleanLayout(); };
-      cleanBody.Paint += (sender, e) => { DrawCleaner(e.Graphics); };
-      cleanBody.MouseMove += (sender, e) =>
-      {
-        int over = -1;
-        for (int i = 0; i < cleanHits.Count; i++) if (cleanHits[i].Key.Contains(e.Location)) over = i;
-        cleanBody.Cursor = over >= 0 ? Cursors.Hand : Cursors.Default;
-        if (over != cleanHover) { cleanHover = over; cleanBody.Invalidate(); }
-      };
-      cleanBody.MouseLeave += delegate { if (cleanHover != -1) { cleanHover = -1; cleanBody.Invalidate(); } };
-      cleanBody.MouseClick += (sender, e) =>
-      {
-        if (e.Button != MouseButtons.Left) return;
-        foreach (KeyValuePair<Rectangle, Action> hit in cleanHits.ToArray()) if (hit.Key.Contains(e.Location)) { hit.Value(); return; }
-      };
-      Action tint = delegate
-      {
-        Look look = mod.look;
-        cleaner.BackColor = head.BackColor = cleanScroll.BackColor = cleanBody.BackColor = look.Shade(1);
-        title.ForeColor = look.Shade(2);
-        TintHead(head, title, look);
-        cleanBody.Invalidate();
-      };
-      tint();
-      cleaner.VisibleChanged += delegate { if (cleaner.Visible) { tint(); CleanLayout(); MeasureClean(null); } };
-      cleaner.Controls.Add(cleanScroll);
-      cleaner.Controls.Add(head);
-    }
-
-    // What it shows: Edge's saved files (the cache), what Capri Browser downloaded, and how many cookies.
+    // How much Edge's saved files (the cache) take up.
     void MeasureClean(Action done)
     {
-      if (measuring) { if (done != null) Later(done); return; }
-      measuring = true;
       string profile = Path.Combine(mod.Folder ?? "", "web-profile");
-      int counted = 0;
-      Action one = delegate { counted++; if (counted < 2) return; measuring = false; if (cleanBody != null) cleanBody.Invalidate(); if (done != null) done(); };
       Behind(delegate
       {
         long size = CacheSize(profile, false);
-        Post(delegate { cacheBytes = size; one(); });
+        Post(delegate { cacheBytes = size; done(); });
       });
-      Viewer v = null;
-      foreach (Tab t in tabs) if (t.Viewer.Modern && !t.Private) { v = t.Viewer; break; }
-      if (v == null) { one(); return; }
-      v.AllCookies(count => { Post(delegate { cookieCount = count; one(); }); });
     }
 
     // Adds up the files in every cache folder of the profile (Cache, Code Cache, GPUCache, CacheStorage and so on).
@@ -7572,14 +7518,7 @@ public class CapriInternalBrowser : ICapriMod
       return total;
     }
 
-    long DownloadedBytes()
-    {
-      long total = 0;
-      foreach (Got g in Gots()) if (g.State == "done") try { if (File.Exists(g.File)) total += new FileInfo(g.File).Length; } catch { }
-      return total;
-    }
-
-    // Start cleaning: Capri gets rid of the gunk, the gauge spins, then it measures again and says how much went.
+    // Capri gets rid of the gunk, measures before and after, and says how much went.
     void StartCleaning()
     {
       if (cleaning) return;
@@ -7592,16 +7531,13 @@ public class CapriInternalBrowser : ICapriMod
       bool recycle = old.Count > 0 && MessageBox.Show(FindForm(), (old.Count == 1 ? "1 file" : old.Count + " files") + " Capri Browser downloaded over 2 weeks ago can go to the Recycle Bin. Move " + (old.Count == 1 ? "it" : "them") + "?", "Capri Cleaner", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
 
       cleaning = true;
-      long before = cacheBytes;
       mod.Tell(Line("cleanstart", "Getting rid of all the gunk!"));
-      if (cleanTimer == null)
-      {
-        cleanTimer = new WinTimer { Interval = 40 };
-        cleanTimer.Tick += delegate { cleanSpin++; if (cleanBody != null) cleanBody.Invalidate(); };
-      }
-      cleanTimer.Start();
-      CleanLayout();
+      MeasureClean(delegate { CleanNow(picked, old, recycle); });
+    }
 
+    void CleanNow(HashSet<string> picked, List<Got> old, bool recycle)
+    {
+      long before = cacheBytes;
       var kinds = new StringBuilder();
       if (picked.Contains("cache")) kinds.Append("DiskCache,CacheStorage,");
       if (picked.Contains("cookies")) kinds.Append("Cookies,");
@@ -7615,26 +7551,21 @@ public class CapriInternalBrowser : ICapriMod
         lock (gots) gots.RemoveAll(g => { return g.State != "going"; });
         SaveGots();
       }
-      if (picked.Contains("tabs")) foreach (Tab t in tabs.ToArray()) if (t != tab) Close(t);
-      DateTime began = DateTime.Now;
+      if (picked.Contains("tabs"))
+      {
+        // From Settings, the page they came from stays too.
+        Tab last = null;
+        if (tab != null && tab.OnReader) foreach (Tab t in tabs) if (t != tab && !t.OnReader && (last == null || t.LeftAt > last.LeftAt)) last = t;
+        foreach (Tab t in tabs.ToArray()) if (t != tab && t != last) Close(t);
+      }
       Action finish = delegate
       {
         MeasureClean(delegate
         {
-          int wait = Math.Max(0, 1400 - (int)(DateTime.Now - began).TotalMilliseconds);
-          var settle = new WinTimer { Interval = Math.Max(1, wait) };
-          settle.Tick += delegate
-          {
-            settle.Stop();
-            settle.Dispose();
-            cleaning = false;
-            cleanTimer.Stop();
-            freedBytes = before > 0 && cacheBytes >= 0 ? Math.Max(0, before - cacheBytes) : -1;
-            CleanLayout();
-            Blip("done");
-            mod.Tell(freedBytes > 1048576 ? Line("cleandone", "All clean, choom. That freed up " + Bytes(freedBytes) + ".") : Line("cleandone", "All clean, choom. Fresh as new."));
-          };
-          settle.Start();
+          cleaning = false;
+          long freed = before > 0 ? before - cacheBytes : 0;
+          Blip("done");
+          mod.Tell(freed > 1048576 ? Line("cleandone", "All clean, choom. That freed up " + Bytes(freed) + ".") : Line("cleandone", "All clean, choom. Fresh as new."));
         });
       };
       Viewer v = null;
@@ -7655,201 +7586,6 @@ public class CapriInternalBrowser : ICapriMod
         fs.GetMethod("DeleteFile", new[] { typeof(string), ui, bin }).Invoke(null, new object[] { file, Enum.Parse(ui, "OnlyErrorDialogs"), Enum.Parse(bin, "SendToRecycleBin") });
       }
       catch { }
-    }
-
-    static PointF[] Oct(RectangleF r, float c)
-    {
-      return new[] { new PointF(r.X + c, r.Y), new PointF(r.Right - c, r.Y), new PointF(r.Right, r.Y + c), new PointF(r.Right, r.Bottom - c), new PointF(r.Right - c, r.Bottom), new PointF(r.X + c, r.Bottom), new PointF(r.X, r.Bottom - c), new PointF(r.X, r.Y + c) };
-    }
-
-    // Where everything goes, and what a click on each does. Painting uses the same places.
-    Rectangle cleanCard, cleanGauge, cleanStart, cleanAdvanced;
-    readonly Rectangle[] cleanPresetBox = new Rectangle[3];
-    readonly List<Rectangle> cleanRows = new List<Rectangle>();
-
-    void CleanLayout()
-    {
-      if (cleanBody == null) return;
-      int w = cleanScroll.ClientSize.Width, pad = 14;
-      cleanHits.Clear();
-      cleanRows.Clear();
-      int size = Math.Max(150, Math.Min(250, w - 2 * pad - 60));
-      cleanCard = new Rectangle(pad, 8, w - 2 * pad, 0);
-      cleanGauge = new Rectangle((w - size) / 2, cleanCard.Y + 18, size, size);
-      int y = cleanGauge.Bottom + 86;
-      int box = 62, gap = (cleanCard.Width - 3 * box) / 4;
-      for (int i = 0; i < 3; i++)
-      {
-        int which = i;
-        cleanPresetBox[i] = new Rectangle(cleanCard.X + gap + i * (box + gap), y, box, box);
-        cleanHits.Add(new KeyValuePair<Rectangle, Action>(cleanPresetBox[i], delegate { if (!cleaning) CleanPick(new HashSet<string>(CleanPresets[which])); }));
-      }
-      cleanCard.Height = cleanPresetBox[0].Bottom + 20 - cleanCard.Y;
-      cleanStart = new Rectangle(pad, cleanCard.Bottom + 12, w - 2 * pad, 40);
-      cleanHits.Add(new KeyValuePair<Rectangle, Action>(cleanStart, delegate { StartCleaning(); }));
-      y = cleanStart.Bottom + 22;
-      int top = y;
-      y += 52;
-      for (int i = 0; i < CleanParts.GetLength(0); i++)
-      {
-        string key = CleanParts[i, 0];
-        bool open = cleanOpen.Contains(key);
-        int tall = 42;
-        if (open) tall += TextRenderer.MeasureText(CleanParts[i, 2], new Font(Ui, 9f), new Size(w - 2 * pad - 32, 0), TextFormatFlags.WordBreak).Height + 10;
-        var row = new Rectangle(pad, y, w - 2 * pad, tall);
-        cleanRows.Add(row);
-        cleanHits.Add(new KeyValuePair<Rectangle, Action>(new Rectangle(row.X, row.Y, row.Width - 44, 42), delegate
-        {
-          if (cleaning) return;
-          HashSet<string> picked = CleanPicked();
-          if (!picked.Remove(key)) picked.Add(key);
-          CleanPick(picked);
-        }));
-        cleanHits.Add(new KeyValuePair<Rectangle, Action>(new Rectangle(row.Right - 44, row.Y, 44, 42), delegate { if (!cleanOpen.Remove(key)) cleanOpen.Add(key); CleanLayout(); }));
-        y += tall;
-      }
-      cleanAdvanced = new Rectangle(pad, top, w - 2 * pad, y + 12 - top);
-      cleanBody.Width = w;
-      cleanBody.Height = cleanAdvanced.Bottom + 20;
-      cleanBody.Invalidate();
-    }
-
-    static string[] SizeParts(long n)
-    {
-      if (n < 0) return new[] { "--", "" };
-      string[] parts = Bytes(n).Split(' ');
-      return parts.Length == 2 ? parts : new[] { parts[0], "" };
-    }
-
-    void DrawCleaner(Graphics g)
-    {
-      Look look = mod.look;
-      Color back = look.Shade(1), deep = look.Shade(0), ink = look.Shade(2), faint = look.Shade(3), red = look.Shade(5), edge = look.Shade(6);
-      Color card = Mix(back, deep, .45f), soft = Mix(edge, faint, .35f);
-      g.SmoothingMode = SmoothingMode.AntiAlias;
-      g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-      Func<Rectangle, int, GraphicsPath> cut = (r, c) =>
-      {
-        var p = new GraphicsPath();
-        p.AddPolygon(new[] { new Point(r.X, r.Y), new Point(r.Right, r.Y), new Point(r.Right, r.Bottom - c), new Point(r.Right - c, r.Bottom), new Point(r.X, r.Bottom) });
-        return p;
-      };
-      Action<string, Font, Color, RectangleF, StringAlignment> say = (text, f, c, r, align) =>
-      {
-        using (var b = new SolidBrush(c))
-        using (var sf = new StringFormat { Alignment = align, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap })
-          g.DrawString(text, f, b, r, sf);
-      };
-
-      // The top card and its gauge: an octagon with red corner pieces (they sweep round while cleaning).
-      using (GraphicsPath p = cut(cleanCard, 14))
-      using (var fill = new SolidBrush(card))
-      using (var line = new Pen(edge)) { g.FillPath(fill, p); g.DrawPath(line, p); }
-      RectangleF outer = cleanGauge;
-      float c1 = outer.Width * .29f;
-      using (var thin = new Pen(edge)) g.DrawPolygon(thin, Oct(outer, c1));
-      RectangleF mid = RectangleF.Inflate(outer, -9, -9);
-      PointF[] m = Oct(mid, c1 - 4);
-      for (int i = 0; i < 8; i++)
-      {
-        PointF a = m[i], b = m[(i + 1) % 8];
-        float glow = 1f;
-        if (cleaning) { double phase = cleanSpin * .16 - i * Math.PI / 4; glow = (float)(.3 + .7 * Math.Max(0, Math.Cos(phase))); }
-        using (var thick = new Pen(Mix(edge, red, glow), 4f) { StartCap = LineCap.Square, EndCap = LineCap.Square })
-        {
-          if (i % 2 == 1) { g.DrawLine(thick, a, b); continue; }
-          float part = .26f;
-          g.DrawLine(thick, a, new PointF(a.X + (b.X - a.X) * part, a.Y + (b.Y - a.Y) * part));
-          g.DrawLine(thick, new PointF(b.X - (b.X - a.X) * part, b.Y - (b.Y - a.Y) * part), b);
-        }
-      }
-      RectangleF inner = RectangleF.Inflate(outer, -outer.Width * .2f, -outer.Height * .2f);
-      using (var fill = new SolidBrush(Mix(deep, back, .35f))) g.FillPolygon(fill, Oct(inner, inner.Width * .2f));
-      using (var thin = new Pen(edge)) g.DrawPolygon(thin, Oct(inner, inner.Width * .2f));
-      using (var dot = new SolidBrush(edge))
-        for (int i = -1; i <= 1; i++) { g.FillEllipse(dot, mid.X + 3, mid.Y + mid.Height / 2 + i * 12 - 2, 4, 4); g.FillEllipse(dot, mid.Right - 7, mid.Y + mid.Height / 2 + i * 12 - 2, 4, 4); }
-      string[] size = SizeParts(cacheBytes);
-      using (var small = new Font(Ui, 8.5f))
-      using (var big = new Font(UiBold, Math.Max(20f, inner.Width / 4.6f)))
-      using (var unit = new Font(UiBold, 12f))
-      {
-        say(cleaning ? "CLEANING..." : freedBytes > 0 ? "FREED " + Bytes(freedBytes).ToUpperInvariant() : "BROWSER FILES", small, faint, new RectangleF(inner.X, inner.Y + inner.Height * .12f, inner.Width, 20), StringAlignment.Center);
-        SizeF bigSize = g.MeasureString(size[0], big), unitSize = g.MeasureString(size[1], unit);
-        float x = inner.X + (inner.Width - bigSize.Width - unitSize.Width + 6) / 2, cy = inner.Y + inner.Height / 2;
-        using (var b = new SolidBrush(ink)) { g.DrawString(size[0], big, b, x, cy - bigSize.Height / 2); g.DrawString(size[1], unit, b, x + bigSize.Width - 6, cy - unitSize.Height / 2 + bigSize.Height * .12f); }
-      }
-      if (cacheBytes > 300L * 1048576 && !cleaning)
-        using (Font glyph = Icons(10f)) say("", glyph, red, new RectangleF(inner.X, inner.Bottom - inner.Height * .3f, inner.Width, 20), StringAlignment.Center);
-
-      // Downloads and cookies under it.
-      int sy = cleanGauge.Bottom + 16, half = cleanCard.Width / 2;
-      string[] dl = SizeParts(DownloadedBytes());
-      string cookies = cookieCount < 0 ? "--" : cookieCount >= 1000 ? (cookieCount / 1000.0).ToString("0.#", CultureInfo.InvariantCulture) : cookieCount.ToString();
-      using (var num = new Font(UiBold, 14f))
-      using (var unit = new Font(UiBold, 9f))
-      using (var small = new Font(Ui, 8.5f))
-      {
-        Action<int, string, string, string> stat = (left, n, u, label) =>
-        {
-          SizeF ns = g.MeasureString(n, num), us = g.MeasureString(u, unit);
-          float x = left + (half - ns.Width - us.Width + 4) / 2;
-          using (var b = new SolidBrush(ink)) { g.DrawString(n, num, b, x, sy); g.DrawString(u, unit, b, x + ns.Width - 4, sy + ns.Height - us.Height - 3); }
-          say(label, small, faint, new RectangleF(left, sy + 30, half, 18), StringAlignment.Center);
-        };
-        stat(cleanCard.X, dl[0], dl[1], "DOWNLOADS");
-        stat(cleanCard.X + half, cookies, cookieCount >= 1000 ? "K" : "", "COOKIES");
-      }
-      using (var line = new Pen(edge)) g.DrawLine(line, cleanCard.X + half, sy + 4, cleanCard.X + half, sy + 46);
-
-      // MIN, MED and MAX.
-      int preset = CleanPreset();
-      string[] names = { "MIN", "MED", "MAX" };
-      for (int i = 0; i < 3; i++)
-      {
-        Rectangle r = cleanPresetBox[i];
-        bool on = i == preset, over = cleanHover == i;
-        PointF[] o = Oct(r, r.Width * .22f);
-        using (var fill = new SolidBrush(on ? Mix(deep, red, .28f) : over ? Mix(card, ink, .06f) : Mix(card, edge, .3f))) g.FillPolygon(fill, o);
-        using (var line = new Pen(on ? red : soft, on ? 2.5f : 1.5f)) g.DrawPolygon(line, o);
-        using (var f = new Font(UiBold, 11f)) say(names[i], f, ink, r, StringAlignment.Center);
-      }
-
-      // Start cleaning.
-      bool startOver = cleanHover == 3;
-      using (GraphicsPath p = cut(cleanStart, 12))
-      using (var fill = new SolidBrush(cleaning ? Mix(red, deep, .35f) : startOver ? Mix(red, Color.White, .12f) : red))
-        g.FillPath(fill, p);
-      using (var notch = new Pen(Mix(red, Color.Black, .45f), 1.5f)) g.DrawLine(notch, cleanStart.Right - 8, cleanStart.Bottom - 1, cleanStart.Right - 1, cleanStart.Bottom - 8);
-      using (var f = new Font(Ui, 11f))
-        say(cleaning ? "Getting rid of all the gunk..." : "Start cleaning", f, Color.White, new RectangleF(cleanStart.X + 14, cleanStart.Y, cleanStart.Width - 28, cleanStart.Height), StringAlignment.Near);
-
-      // Advanced setup: a switch for each part, and a little arrow that says what it does.
-      using (GraphicsPath p = cut(cleanAdvanced, 14))
-      using (var fill = new SolidBrush(card))
-      using (var line = new Pen(edge)) { g.FillPath(fill, p); g.DrawPath(line, p); }
-      using (var f = new Font(UiBold, 12f)) say("ADVANCED SETUP", f, ink, new RectangleF(cleanAdvanced.X + 16, cleanAdvanced.Y + 12, cleanAdvanced.Width - 32, 30), StringAlignment.Near);
-      HashSet<string> picked = CleanPicked();
-      using (var f = new Font(Ui, 10.5f))
-      using (var about = new Font(Ui, 9f))
-      using (Font glyph = Icons(8f))
-        for (int i = 0; i < cleanRows.Count; i++)
-        {
-          Rectangle row = cleanRows[i];
-          string key = CleanParts[i, 0];
-          bool on = picked.Contains(key);
-          var pill = new Rectangle(row.X + 16, row.Y + 11, 36, 20);
-          using (var fill = new SolidBrush(on ? Mix(red, deep, .35f) : deep)) g.FillRectangle(fill, pill);
-          using (var line = new Pen(on ? red : soft)) g.DrawRectangle(line, pill);
-          Rectangle knob = on ? new Rectangle(pill.Right - 16, pill.Y + 3, 13, 14) : new Rectangle(pill.X + 3, pill.Y + 3, 13, 14);
-          using (var k = new SolidBrush(on ? Color.White : Mix(faint, look.Shade(4), .25f))) g.FillRectangle(k, knob);
-          bool hot = cleanHover >= 4 && (cleanHover - 4) / 2 == i;
-          say(CleanParts[i, 1], f, hot ? Mix(ink, red, .35f) : ink, new RectangleF(pill.Right + 12, row.Y, row.Width - 120, 42), StringAlignment.Near);
-          bool open = cleanOpen.Contains(key);
-          say(open ? "" : "", glyph, ink, new RectangleF(row.Right - 40, row.Y, 26, 42), StringAlignment.Center);
-          if (open)
-            using (var b = new SolidBrush(faint))
-              g.DrawString(CleanParts[i, 2], about, b, new RectangleF(row.X + 16, row.Y + 40, row.Width - 32, row.Height - 42));
-        }
     }
 
     // ---- Downloads: the button by Summarise and its menu of recent downloads ----
@@ -10830,7 +10566,8 @@ public class CapriInternalBrowser : ICapriMod
       html.Append(open(4)).Append(Row(T(36), "Strict may break some sites.", Pick("track", levels, levelNames, look.Track.ToString(), false)));
       html.Append(Row(T(41), About("t41"), Switch("ads", look.Ads))).Append(extras("privacy"));
       html.Append(Row(T(42), About("t42"), Btn("wipe", T(42), false)));
-      html.Append(Row("Backup", "Saves your notes, bookmarks, Speed Dial, jobs and settings to a file. Never passwords, history, tabs or sign-ins.", Btn("backup", "Back up", false) + Btn("unbackup", "Restore", false)));
+      html.Append(CleanRows());
+      html.Append("<h3 class='sub'>BACKUP</h3>").Append(Row("Backup", "Saves your notes, bookmarks, Speed Dial, jobs and settings to a file. Never passwords, history, tabs or sign-ins.", Btn("backup", "Back up", false) + Btn("unbackup", "Restore", false)));
       html.Append("<h3 class='sub'>SITE SETTINGS</h3>").Append(Row("All sites", About("allsites"), "<button class='bt' onclick=\"S('site','*')\">Open</button>"));
       SortedDictionary<string, int> changed = PermSites();
       foreach (KeyValuePair<string, int> one in changed)
@@ -10909,6 +10646,7 @@ public class CapriInternalBrowser : ICapriMod
         case "wallpaper": ImportWallpaper(); break;
         case "nowall": mod.RemoveWallpaper(); ShowWallState(null); RefreshHomes(); break;
         case "wipe": ClearSiteData(); break;
+        case "clean": Later(StartCleaning); return;
         case "backup": Later(BackUp); return;
         case "unbackup": Later(RestoreFrom); return;
         case "update": UpdateAll(); return;
@@ -10916,6 +10654,13 @@ public class CapriInternalBrowser : ICapriMod
         case "folder": PickSaveFolder(); break;
         case "video": TurnOnVideo(); break;
         default:
+          if (key.Begins("clean-"))
+          {
+            HashSet<string> picked = CleanPicked();
+            if (on) picked.Add(key.Substring(6)); else picked.Remove(key.Substring(6));
+            CleanPick(picked);
+            return;
+          }
           if (!key.Begins("x-")) return;
           if (key == "x-hello") { Later(delegate { SetHello(on); }); return; }
           if (key == "x-darkweb") SetDarkWeb(on); else if (Host != null) Host.Store.Set("opt-" + key.Substring(2), on ? "1" : "0");
@@ -11459,7 +11204,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
 
     // Noted and Bookmarks live over the page, in the page's own area. Opening slides one in from the sidebar's edge (only its position moves, so
     // nothing re-lays out while it does); closing slides it back. Pinned, it sits beside the page instead, and stays when they click the page.
-    bool PinnedSide(Panel p) { return Kept(p == notes ? "pin-noted" : p == cleaner ? "pin-cleaner" : p == pwPanel ? "pin-passwords" : p == sideSetup ? "pin-sidesetup" : "pin-marks") == "1"; }
+    bool PinnedSide(Panel p) { return Kept(p == notes ? "pin-noted" : p == pwPanel ? "pin-passwords" : p == sideSetup ? "pin-sidesetup" : "pin-marks") == "1"; }
 
     void PlaceSide(Panel p)
     {
@@ -11472,7 +11217,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     {
       if (full) return;
       if (p.Visible) { SlideIn(p, width); return; }
-      foreach (Panel other in new[] { notes, marks, cleaner, pwPanel, sideSetup }) if (other != p && other.Visible) SlideIn(other, other.Width);
+      foreach (Panel other in new[] { notes, marks, pwPanel, sideSetup }) if (other != p && other.Visible) SlideIn(other, other.Width);
       int my = NextSlide(p);
       p.Dock = DockStyle.None;
       p.Width = width;
@@ -11509,7 +11254,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     // Clicking the page closes a panel that isn't pinned, like Opera's.
     void PageClicked()
     {
-      foreach (Panel p in new[] { notes, marks, cleaner, pwPanel, sideSetup }) if (p.Visible && p.Dock != DockStyle.Left && !PinnedSide(p) && Form.ActiveForm == FindForm()) SlideIn(p, p.Width);
+      foreach (Panel p in new[] { notes, marks, pwPanel, sideSetup }) if (p.Visible && p.Dock != DockStyle.Left && !PinnedSide(p) && Form.ActiveForm == FindForm()) SlideIn(p, p.Width);
     }
 
     // The top of a side panel: its icon and name, a pin, and close.
@@ -11520,7 +11265,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       title = new Label { Text = name, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font(UiBold, 14f), UseMnemonic = false, AutoEllipsis = true };
       Button shut = Flat("\uE711", "Close (Esc)", DockStyle.Right, 40);
       Button pin = Flat("\uE718", "Pin beside the page", DockStyle.Right, 36);
-      string key = p == notes ? "pin-noted" : p == cleaner ? "pin-cleaner" : p == pwPanel ? "pin-passwords" : p == sideSetup ? "pin-sidesetup" : "pin-marks";
+      string key = p == notes ? "pin-noted" : p == pwPanel ? "pin-passwords" : p == sideSetup ? "pin-sidesetup" : "pin-marks";
       Action showPin = delegate { bool on = Kept(key) == "1"; pin.Text = on ? "\uE841" : "\uE718"; pin.Tag = on ? "red" : null; pin.ForeColor = on ? mod.look.Shade(5) : mod.look.Shade(3); };
       pin.Click += delegate
       {
@@ -11549,7 +11294,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       };
       grip.MouseDown += (sender, e) => { if (e.Button != MouseButtons.Left) return; dragging = true; from = Cursor.Position.X; was = p.Width; grip.Capture = true; grip.Invalidate(); };
       grip.MouseMove += delegate { if (dragging) p.Width = Math.Max(260, Math.Min(Math.Min(720, holder.Width - 200), was + Cursor.Position.X - from)); };
-      grip.MouseUp += delegate { if (!dragging) return; dragging = false; grip.Capture = false; grip.Invalidate(); Keep(p == notes ? "noteswidth" : p == cleaner ? "cleanerwidth" : p == pwPanel ? "passwordswidth" : p == sideSetup ? "sidesetupwidth" : "markswidth", p.Width.ToString()); };
+      grip.MouseUp += delegate { if (!dragging) return; dragging = false; grip.Capture = false; grip.Invalidate(); Keep(p == notes ? "noteswidth" : p == pwPanel ? "passwordswidth" : p == sideSetup ? "sidesetupwidth" : "markswidth", p.Width.ToString()); };
       p.Controls.Add(grip);
       p.KeyDown += (sender, e) => { if (e.KeyCode == Keys.Escape) SlideIn(p, p.Width); };
       return head;
@@ -14203,7 +13948,7 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       SideButton("\uE943", "Capri on GitHub", "https://github.githubassets.com/favicons/favicon-dark.png").Click += delegate { OpenTab(null, "https://github.com/lachydotmcg/capri-desktop", true); };
       SideButton("\uE734", "Bookmarks (Ctrl+Shift+B)", null).Click += delegate { ToggleSide(marks, marks.Width); };
       SideButton("\uE724", "Noted", null).Click += delegate { ToggleSide(notes, NotesWide()); if (notes.Visible) noteText.Focus(); };
-      SideButton("\uEA99", "Capri Cleaner", null).Click += delegate { ToggleSide(cleaner, cleaner.Width); };
+      SideButton("\uEA99", "Capri Cleaner", null).Click += delegate { ShowCleaner(); };
       SideButton("\uE81C", T(49), null).Click += delegate { ShowHistory(); };
       SideButton("\uE7FC", "Games", null).Click += delegate { ShowGames(); };
       SideButton("\uE8FD", "Custom jobs", null).Click += delegate { ShowJobs(); };
@@ -14266,11 +14011,10 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
 
       BuildNoted();
       BuildMarks();
-      BuildCleaner();
       BuildPasswords();
       BuildSideSetup();
-      notes.Dock = marks.Dock = cleaner.Dock = pwPanel.Dock = sideSetup.Dock = DockStyle.None;
-      notes.Visible = marks.Visible = cleaner.Visible = pwPanel.Visible = sideSetup.Visible = false;
+      notes.Dock = marks.Dock = pwPanel.Dock = sideSetup.Dock = DockStyle.None;
+      notes.Visible = marks.Visible = pwPanel.Visible = sideSetup.Visible = false;
       holder.Controls.Add(pwPanel);
       holder.Controls.Add(sideSetup);
       ApplySide();
@@ -14278,14 +14022,13 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       Bested = (k, v) => { Post(delegate { Invite(k, v); }); };
       holder.Controls.Add(notes);
       holder.Controls.Add(marks);
-      holder.Controls.Add(cleaner);
-      holder.Resize += delegate { PlaceSide(notes); PlaceSide(marks); PlaceSide(cleaner); PlaceSide(pwPanel); PlaceSide(sideSetup); };
+      holder.Resize += delegate { PlaceSide(notes); PlaceSide(marks); PlaceSide(pwPanel); PlaceSide(sideSetup); };
       // A new tab's page goes under an open panel, and beside a pinned one.
       holder.ControlAdded += (sender, e) =>
       {
-        if (e.Control == notes || e.Control == marks || e.Control == cleaner || e.Control == pwPanel || e.Control == sideSetup) return;
+        if (e.Control == notes || e.Control == marks || e.Control == pwPanel || e.Control == sideSetup) return;
         e.Control.GotFocus += delegate { PageClicked(); };
-        foreach (Panel p in new[] { notes, marks, cleaner, pwPanel, sideSetup }) if (p.Visible) { if (p.Dock == DockStyle.Left) p.SendToBack(); else p.BringToFront(); }
+        foreach (Panel p in new[] { notes, marks, pwPanel, sideSetup }) if (p.Visible) { if (p.Dock == DockStyle.Left) p.SendToBack(); else p.BringToFront(); }
       };
       foreach (Control c in holder.Controls) if (c != notes && c != marks) { Control page = c; page.GotFocus += delegate { PageClicked(); }; }
       Controls.Add(side);
@@ -16067,7 +15810,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
     public virtual void ClearKinds(string kinds, Action<string> done) { done("that needs Edge's engine"); }
     // EngineId: the process id of Edge's engine behind this page, or 0.
     public virtual int EngineId { get { return 0; } }
-    public virtual void AllCookies(Action<int> got) { got(-1); }
     // Downloading: a download started (Edge's download, the file it goes to, and where from).
     public Action<object, string, string> Downloading;
     // Capri's own menu in place of Edge's: her items first, then Edge's, which run by their command ids when picked.
@@ -17009,26 +16751,6 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
       catch (Exception error) { done(Inner(error).Message); }
     }
 
-    // How many cookies every site has together.
-    public override void AllCookies(Action<int> got)
-    {
-      if (core == null) { got(-1); return; }
-      try
-      {
-        Task find = (Task)Call(Get(core, "CookieManager"), "GetCookiesAsync", "");
-        find.ContinueWith(f =>
-        {
-          int count = -1;
-          if (f.Status == TaskStatus.RanToCompletion)
-          {
-            ICollection list = Get(f, "Result") as ICollection;
-            if (list != null) count = list.Count;
-          }
-          got(count);
-        });
-      }
-      catch (Exception) { got(-1); }
-    }
 
     public override void Html(string html) { Run(delegate { Call(core, "NavigateToString", html); }); }
     public override void Go(string url) { Run(delegate { Call(core, "Navigate", url); }); }
