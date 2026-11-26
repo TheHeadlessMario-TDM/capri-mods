@@ -4,7 +4,7 @@ Capri glances at your screen now and then to react to it. **No Random Glances** 
 
 It also fixes pictures: with a picture pasted or attached, "look at this cool pic" means **the picture**. Capri's own command check would otherwise read it as "look at my screen" and ignore what you sent, so the mod marks such messages "(picture attached)".
 
-Asking her to look at your screen still works as normal. Turning the mod off brings her timed glances back.
+Asking her to look at your screen still works as normal, including when Watch my screen is off. Leave Watch my screen on to use custom phrases or laughing as cues. The mod suppresses the timed glances. Turning the mod off brings her timed glances back.
 
 **Options:** the phrases · laughing on/off (off) · how long to wait for the glance
 
@@ -13,7 +13,7 @@ Reaches into Capri's glance timer and her attachments, so a Capri update that ch
 - Kind: code mod
 - Made by: Quaisar_THM
 - Needs: Capri with mod API 3 (0.8.7 or newer), Windows
-- Permissions: chat
+- Permissions: chat, settings (reads whether Watch my screen is on)
 
 ### Why the mod check flags it
 - **Changes what her brain is told**: only to add "(picture attached)" in front of a message sent with a picture, so it isn't taken as a screen command.

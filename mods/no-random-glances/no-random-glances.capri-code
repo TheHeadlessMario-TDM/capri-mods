@@ -4,7 +4,7 @@
 // version: 1.0.0
 // author: Quaisar_THM
 // description: She stops glancing at your screen on a timer and only looks when you ask: "look at this", "check this out" and the like. Phrases are in Options.
-// permissions: chat
+// permissions: chat, settings
 // requires: api 3
 
 using System;
@@ -49,7 +49,7 @@ public class GlanceOnCue : ICapriMod
             opts.Text("Phrases that make her look at your screen, comma separated", "cues", DefaultCues, delegate(string v) { BuildCue(); });
             opts.Toggle("Laughing counts too (haha, lol, lmao, and the laughing emojis)", "laugh", false, delegate(bool v) { BuildCue(); });
             opts.Number("Give up waiting for the glance after (seconds)", "wait", 15, 3, 60, 1, 0, delegate(double v) { armedMs = (int)(v * 1000); });
-            opts.Note("Her timed glances stay off while this mod is on. \"Look at my screen\" always works.");
+            opts.Note("Custom cues use Watch my screen. The mod keeps timed glances off. \"Look at my screen\" always works.");
         }
         BuildCue();
         armedMs = (int)(opts.Num("wait", 15, 3, 60) * 1000);
@@ -88,7 +88,8 @@ public class GlanceOnCue : ICapriMod
 
     public bool Heard(string words)
     {
-        if (!IsCue(words) || PictureWaiting()) return false;
+        // With Watch off, Capri can still handle explicit requests through her normal command path.
+        if (!IsCue(words) || PictureWaiting() || capri.Settings.IsOn("watch_my_screen") != true) return false;
         Form f = Her();
         if (f == null) return false;
         armed = true;
