@@ -11933,8 +11933,8 @@ m.firstChild.addEventListener('click',function(){var a=on;shut();if(!a)return;lo
 
 		// ---- Backup: only what's on this list, as plain text. Never passwords, history, tabs, sign-ins, site permissions or leaderboard keys ----
 		static readonly Regex BackedUp = new Regex("^(?:theme|font|size|sites|names|language|search|ads|restore|track|allowed|trackok|dial|dial-names|bookmarks|bookfolders|notes|notelist|notebooks|notebookof|noteedited|noteswidth|jobs|research|researchlen|animesite|animelink|videosite|videolink|soundvol|holospot|cleanparts|(?:side|pin|opt)-[a-z0-9-]{1,30})$");
-		// Reading or sending messages is always switched on by hand, never by a file.
-		static readonly Regex ByHand = new Regex("^opt-(?:read|autoread|discord|quietmsg|hello)");
+		// Reading, showing or sending messages is always switched on by hand, never by a file.
+		static readonly Regex ByHand = new Regex("^opt-(?:read|autoread|discord|herdc$|quietmsg|hello)");
 		const string BackupHead = "Capri Browser backup 1";
 
 		string BackupText()
