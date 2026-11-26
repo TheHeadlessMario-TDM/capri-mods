@@ -1,12 +1,23 @@
 # Capri Browser
 
-Capri's own web browser, so she browses with you: she opens sites, finds and plays videos, and reads pages out loud. Say "Capri, research this for me" (smart research that works even with small brains) or "Capri, find a cheaper one". Custom jobs, games, stats and weekly leaderboards, a strong ad and tracker blocker, in 23 languages. Just updated? Remember to open Capri Browser from Play.
+You say it, Capri does it: a real web browser she uses with you. "Find me a funny video" and it's playing. "Research this for me" and she reads the sites. "Find it cheaper" and she hunts for a better price. Blocks ads and trackers, runs your own custom jobs, has games with weekly leaderboards, and speaks 23 languages. Safe by design: she asks before sending messages or forms, never types your passwords, has no telemetry, and every add-on file is checked. Right-click Capri > Play to open it.
 
 - Kind: code mod
-- Version: 2.0.1
+- Version: 2.0.2
 - Made by: tob7as
-- Needs: **Capri 0.9.4 or newer** on **Windows 10 or 11** (about 1020 KiB of readable code, under the 1 MiB code mod limit). It uses Microsoft Edge's WebView2 engine, which comes with both
+- Needs: **Capri 0.9.4 or newer** on **Windows 10 or 11** (about 970 KiB of readable code, under the 1 MiB code mod limit). It uses Microsoft Edge's WebView2 engine, which comes with both
 - Windows only
+
+## Is it safe?
+
+- **Checked before it's listed.** Every mod in this repo is checked for malware before it goes up, and all of this one's code is readable here.
+- **She asks first.** Sending a message, filling in and sending a form, or clicking on a messaging site waits for your own yes. Text on a web page can't say yes for you.
+- **Your passwords stay yours.** Capri never reads or types them. Saved ones are encrypted by Windows on your PC, and Windows Hello can guard them (off until you turn it on).
+- **No telemetry, no account, no keys inside.** Page text only goes to her brain when you ask about a page or use a feature that says so. Private tabs are never read. What is sent, and where, is listed below.
+- **Nothing can be swapped.** Games, lists and pages are checked against fingerprints inside the mod, and anything that doesn't match is thrown away.
+- **You're in charge.** Esc stops her, Discord features start off, and features can be switched off in Settings.
+
+Like any browser, the websites you visit can see what you do on them. Blocked ads and warnings help, but no browser can promise a bad site is harmless.
 
 ## Say this
 
@@ -47,6 +58,8 @@ Capri's own web browser, so she browses with you: she opens sites, finds and pla
 | "remind me about this tonight" / "remind me in 2 hours about this" | Brings the page back then |
 | "what's 20% of 85" / "what time is it in Tokyo" / "5 km in miles" | Answers straight away, no tab |
 | "open custom jobs" | Opens your Custom jobs |
+| "show me your room" | Opens Capri's 3D room: a made-up place, new every day, with things to find for her shelf. Also a sidebar button you can hide |
+| "you'd like this" | Keeps the page you're on (title and address, on this PC only) on a wall in Capri's room. Never private tabs or messaging sites |
 | Your own job's words, like "movie night" | Runs your Custom job |
 | "make a job called movie night: open youtube.com, full screen" | Makes a Custom job (she checks it with you first) |
 | "what jobs do I have?", "delete my movie night job" | Lists or deletes your jobs (deleting asks first) |
@@ -57,7 +70,7 @@ Capri's own web browser, so she browses with you: she opens sites, finds and pla
 
 ### Discord (off until you turn it on)
 
-Turn on **Message via Discord in the browser** in Settings > Capri features. Capri finds the person, server or channel, then tells you exactly who and what and **waits for you to say yes** before she sends, calls or joins. She only acts on your own yes, never on something she read on a page.
+Turn on **Send Discord messages for you** in Settings > Discord. Capri finds the person, server or channel, then tells you exactly who and what and **waits for you to say yes** before she sends, calls or joins. She only acts on your own yes, never on something she read on a page.
 
 | Say | She does |
 | --- | --- |
@@ -95,10 +108,11 @@ If she still can't do a step she tells you which, and the job's card says so. St
 
 ## Also in it
 
+- **New in 2.0.2:** **Capri's room**, a 3D room with Capri in it (her own drawings, read from your Capri; her desktop picture hides while the room is in front, with a switch in Settings). 24 things to find, a guestbook, gifts, a story, and frames for your own pictures (made small and kept as files beside the mod, on this PC only). A hologram shows what Windows says is playing (title, artist and picture, read while the room is in front, with a switch in Settings), a screen shows her running job, and another can show her hidden Discord (off by default, chat pages only, blurred until clicked). Those are kept in memory only, never saved or sent. The sky outside follows the PC's clock and the weather is random, with no lookups. Two arcade machines open Typing Race and Neon Snake (pinned game files) and show best scores. Lights have party, cosy and off. You can drag Capri around the room. It runs under a strict content policy, its model is a pinned file, and nothing on it is sent anywhere. Settings are sorted into groups with a search box. Custom jobs can listen for your words while they run (listen for "skip" = next video), repeat a number of times or forever, and wait a random time; "put on something chill" searches and plays something, Esc always stops a job, and she says which steps she couldn't do. **Don't use my mouse** lets jobs run in their own tab while you do other things. **Open Capri Browser when Capri starts with your PC** (off by default; the mod adds nothing to Windows start-up, it uses Capri's own Start with Windows). **Windows Hello** before a saved password is shown, copied or filled (off by default). **Backup and restore** for notes, bookmarks, Speed Dial, jobs and settings (never passwords). **Hide Capri while a video is full screen**, with a side button to bring her back (off by default). A research progress card, crash recovery, and Capri Cleaner now lives in Settings > Cleaner & backup.
 - **New in 2.0.1:** after an update Capri reminds you to open Capri Browser from Play. Write a custom job the way you'd say it and she splits it into steps (Capri learn too), keeping every line; "put it in my work notes" files the summary and screenshot there, and "open any website" picks one for you. The Summarise button shows her reading scan. Your Anime site and Video site (custom links too) are always used unless you name another one. Switch tabs while she works and she carries on in hers, leaving the mouse alone while you use it. Settings and message notifications follow your colour theme, and your font and text size work on all of Capri Browser's own pages. The pencil on a Speed Dial tile lets you **Change image**, **Edit name** or **Edit link**. Right-click any picture and pick **Make wallpaper**: it is fitted and smoothed to your screen, and Change wallpaper lists your newest pictures first. Useful information has a new Games section (select it to open the Games page) and explains highlight and right-click, research, custom jobs and more. Every game shows on the Games page straight away, and **Daily Word Search** gives everyone the same new puzzle each day (140 themes, a hard one every third day) (keep your streak, copy your time to share). The tracker blocker catches more (including the Facebook and LinkedIn pixels) and works before you download the add-ons. All-time stats show how many ads, trackers and pop-ups the ad blocker has stopped. All-time stats also show your word searches and a Capri Helped You section (things researched, jobs, messages read out, skips), all kept on your PC, and there are 27 new achievements. Sketchy downloads (a program from a site she doesn't know, or a file pretending to be a picture or document) wait for your yes. Game mode can switch on by itself when a full-screen game starts. Capri's notifications can all be turned off with one switch, or one by one. You choose which numbers go on the leaderboards, and a new best tells you where it would place. Research can be Short, Mid or Long, and she asks if you want her to keep researching (new sites, without repeating herself). Code Breach and Mystery Choom are retired.
 - **Noted**: notes as a chat with yourself. Leave a note in the box at the bottom (Enter sends), paste or attach pictures and files, add the page's link, and make your own Noted chats (Capri only uses yours and asks "Should I add it to Shopping notes?"). Right-click a card to edit, copy, move or delete it.
 - **Bookmarks**: the star on the sidebar (Ctrl+Shift+B), with folders, search, drag and drop, and Import from Opera GX, Opera, Chrome, Edge, Brave or Vivaldi (read from their file on your PC only when you press it). The star in the address box bookmarks the page (Ctrl+Shift+D).
-- **Extensions**: the puzzle next to Summarise. Add Chrome-style extensions you downloaded yourself (a folder, .zip or .crx), turn them on or off, open their popup or options, or remove them. On a Chrome Web Store page, **Add to Capri Browser** downloads that extension from Google (clients2.google.com) and installs it.
+- **Extensions**: the puzzle next to Summarise. Add Chrome-style extensions you downloaded yourself (a folder, .zip or .crx), turn them on or off, open their popup or options, or remove them. On a Chrome Web Store page, **Add to Capri Browser** downloads that extension from Google (clients2.google.com) and installs it. Parts only for the browser itself (developer tools, side panels, bookmarks, history, downloads) are left out of her copy; themes, new tab or search takeovers, proxies, screen or tab recorders and ones needing an app on your PC are refused.
 - **Screenshots**: the camera next to the puzzle. Pick an area (Ctrl+Shift+X), what's on screen, or the whole page. Each one is saved in Pictures\Capri Browser, copied, and can go into Noted.
 - Smoother: side panels slide, tabs grow in and shrink away, glide into place when moved and pop when picked, a red line glides to the tab you pick, menus fade in
 - **Game mode** (bottom of the left sidebar): other tabs snooze, every page uses Edge's low memory level and the engine runs at idle priority, so your game gets the PC. Click it again for normal.
@@ -118,7 +132,7 @@ If she still can't do a step she tells you which, and the job's card says so. St
 
 - **It replaces two of her tools.** While the mod is on, her `open_app` (for browsers) and `open_website` tools open pages in Capri Browser instead of your normal browser.
 - **It adds a `capri_browser` tool** she uses to open, search, read, click, type and scroll. On messaging and social sites (Discord, Gmail, Outlook, WhatsApp, Messenger, Facebook, Instagram, X, Reddit, Telegram, Slack, Teams, LinkedIn, TikTok, Snapchat, Bluesky) a click, typing or Enter **waits for your yes**, so text on a page can't make her send something.
-- **It moves your real mouse and presses keys.** Before she clicks, skips, plays or scrolls on a page, the mouse glides to that spot with the takeover animation (Settings > Capri features > Move the real mouse turns this off; the action itself still happens). It only clicks for real to press a Skip button you said yes to, and for full screen on sites that need a real click (it also presses F there).
+- **It moves your real mouse and presses keys.** Before she clicks, skips, plays or scrolls on a page, the mouse glides to that spot with the takeover animation (Settings > Capri features > Move the mouse when Capri uses a page turns this off; the action itself still happens). It only clicks for real to press a Skip button you said yes to, and for full screen on sites that need a real click (it also presses F there).
 
 ## What it sends, and where
 
