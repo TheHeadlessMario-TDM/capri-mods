@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "commit": "bb7407f41bbff96259d3e5b84e758b57470954da",
+  "commit": "64de7192a84c1313c5ec4eae18cd0127f20a645b",
   "tree": [
     {"path": "mods/MK001-dice-roller/MK001-dice-roller.capri-code", "type": "blob", "sha": "d2fc7cd88cfa7b85789e78741371f7191735bc9f", "size": 249409},
     {"path": "mods/MK001-dice-roller/README.md", "type": "blob", "sha": "aefd508a141369224a2388269f57346f63222ca9", "size": 1996},
@@ -248,6 +248,9 @@
     {"path": "mods/nicknames/README.md", "type": "blob", "sha": "8dee78426ae183bd2e3c4364be56f64a68e1d5fe", "size": 1050},
     {"path": "mods/nicknames/nicknames.capri-code", "type": "blob", "sha": "c66d2c724972e7e5152f5fd5b258143ec5947ed8", "size": 10933},
     {"path": "mods/nicknames/preview.png", "type": "blob", "sha": "442f8e28bd8c7d96a4a95d1fa3040a50827e48ed", "size": 815365},
+    {"path": "mods/no-random-glances/README.md", "type": "blob", "sha": "cbb925ec0734d11bc4542163d19c39c7f08cc21f", "size": 1664},
+    {"path": "mods/no-random-glances/no-random-glances.capri-code", "type": "blob", "sha": "47872f37363575058d5e6000a6228a7e4ba7fe61", "size": 16654},
+    {"path": "mods/no-random-glances/preview.png", "type": "blob", "sha": "e979723b1f89f4c165658c745d765896e420811c", "size": 1259983},
     {"path": "mods/nova-angel/README.md", "type": "blob", "sha": "cd459e76ff86c83a0a7db6abcfc2a427f450fe10", "size": 1303},
     {"path": "mods/nova-angel/nova-angel.capri-skin", "type": "blob", "sha": "500947062c69754f7d46870746a6cb1ed663f317", "size": 25053266},
     {"path": "mods/nova-angel/preview.png", "type": "blob", "sha": "2be23363f3d55431a2e36a714e074c2be9baa8eb", "size": 572395},
