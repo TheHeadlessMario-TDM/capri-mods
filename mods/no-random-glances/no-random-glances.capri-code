@@ -33,6 +33,7 @@ public class GlanceOnCue : ICapriMod
     ICapriHost capri;
     Form her;
     FieldInfo nextGlance, lastGlance, alsoHeard;
+    MethodInfo nativeHeard;
     Func<string, bool> theirAlsoHeard;
     volatile bool armed;
     DateTime armedAt;
@@ -64,7 +65,11 @@ public class GlanceOnCue : ICapriMod
 
             // Her ears only pass on lines that are "for her". This hook is how
             // mods add more, so asking her to look counts even without her name.
-            alsoHeard = app.GetType("CapriDesktop.Hands", true).GetField("AlsoHeard", Stat);
+            Type hands = app.GetType("CapriDesktop.Hands", true);
+            alsoHeard = hands.GetField("AlsoHeard", Stat);
+            Type toolArguments = app.GetType("CapriDesktop.ToolArguments", false);
+            nativeHeard = toolArguments == null ? null : hands.GetMethod("Heard", Stat, null,
+                new[] { typeof(string), typeof(string).MakeByRefType(), toolArguments.MakeByRefType(), typeof(bool) }, null);
             theirAlsoHeard = (Func<string, bool>)alsoHeard.GetValue(null);
             Func<string, bool> before = theirAlsoHeard;
             alsoHeard.SetValue(null, (Func<string, bool>)delegate(string words) { return IsCue(words) || before(words); });
@@ -89,7 +94,7 @@ public class GlanceOnCue : ICapriMod
     public bool Heard(string words)
     {
         // With Watch off, Capri can still handle explicit requests through her normal command path.
-        if (!IsCue(words) || PictureWaiting() || capri.Settings.IsOn("watch_my_screen") != true) return false;
+        if (!IsCue(words) || PictureWaiting() || capri.Settings.IsOn("watch_my_screen") != true || NativeHandles(words)) return false;
         Form f = Her();
         if (f == null) return false;
         armed = true;
@@ -100,6 +105,14 @@ public class GlanceOnCue : ICapriMod
             nextGlance.SetValue(f, 0.0);    // due now: her next tick takes the look
         });
         return true;                         // the cue is for the glance, not a chat reply
+    }
+
+    // The mod's timer is only a fallback for custom cues that Capri doesn't already handle.
+    bool NativeHandles(string words)
+    {
+        if (nativeHeard == null) return true;
+        try { return (bool)nativeHeard.Invoke(null, new object[] { words, null, null, false }); }
+        catch (TargetInvocationException) { return true; }
     }
 
     void OnSending(CapriMessage m)
@@ -130,9 +143,10 @@ public class GlanceOnCue : ICapriMod
         List<string> parts = new List<string>();
         List<string> words = new List<string>();
         foreach (string w in Opts.Words(opts.Str("cues", DefaultCues))) words.Add(Regex.Escape(w));
-        if (words.Count > 0) parts.Add(@"\b(?:" + string.Join("|", words.ToArray()) + @")\b");
+        if (words.Count > 0) parts.Add("(?:" + string.Join("|", words.ToArray()) + ")");
         if (opts.Flag("laugh", false)) parts.Add(Laugh);
-        cue = parts.Count == 0 ? null : new Regex(string.Join("|", parts.ToArray()), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        cue = parts.Count == 0 ? null : new Regex(@"^\s*(?:(?:hey\s+)?capri[\s,]+)?(?:" +
+            string.Join("|", parts.ToArray()) + @")[\s.!?]*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 
     bool IsCue(string words)
