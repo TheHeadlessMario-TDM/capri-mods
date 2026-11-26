@@ -10635,6 +10635,18 @@ public class CapriInternalBrowser : ICapriMod
 		string herJob = "null";
 		int herTick;
 		bool herBusy, herFresh, herGrab;
+		int herDcGeneration;
+
+		void SetHerDiscord(bool on)
+		{
+			if (Host == null) return;
+			Host.Store.Set("opt-herdc", on ? "1" : "0");
+			herDcGeneration++;
+			if (!on)
+				foreach (Tab open in tabs)
+					if (open.Special == "her") ToHer(open, "window.herDc&&herDc(null)");
+		}
+
 		void HerLive(Tab t)
 		{
 			if (++herTick % 3 != 0) return;
@@ -10650,14 +10662,18 @@ public class CapriInternalBrowser : ICapriMod
 			if (!Flag("herdc", false) || dc == null || dc.Viewer.Control.IsDisposed) { ToHer(t, "window.herDc&&herDc(" + (Flag("herdc", false) ? "''" : "null") + ")"); return; }
 			// Only a chat page of her own hidden Discord, never its sign-in.
 			if (herGrab || dc.Address == null || !dc.Address.StartsWith("https://discord.com/channels/", Exact)) return;
+			int generation = herDcGeneration;
 			herGrab = true;
 			dc.Viewer.Grab(got =>
 			{
-				herGrab = false;
-				if (got == null) return;
 				string small = null;
-				try { using (got) small = SmallJpeg(got, 560); } catch { }
-				if (small != null) ToHer(t, "window.herDc&&herDc('" + small + "')");
+				if (got != null) try { using (got) small = SmallJpeg(got, 560); } catch { }
+				Post(delegate
+				{
+					herGrab = false;
+					if (small != null && generation == herDcGeneration && Flag("herdc", false))
+						ToHer(t, "window.herDc&&herDc('" + small + "')");
+				});
 			});
 		}
 
@@ -11086,6 +11102,7 @@ public class CapriInternalBrowser : ICapriMod
 						return;
 					}
 					if (!key.Begins("x-")) return;
+					if (key == "x-herdc") { SetHerDiscord(on); return; }
 					if (key == "x-hello") { Later(delegate { SetHello(on); }); return; }
 					if (key == "x-darkweb") SetDarkWeb(on); else if (Host != null) Host.Store.Set("opt-" + key.Substring(2), on ? "1" : "0");
 					if (key == "x-brainfirst") { if (on) brainWasFirst = true; BrainFirst(); }
